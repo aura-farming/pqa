@@ -1,0 +1,43 @@
+name: invariant
+# PQA-specific quality gate. Enforces the one architectural rule no branch may weaken
+# (no verifier bypass), proves every hook still behaves, and runs mutation testing so a
+# branch can't pass with tests that assert nothing.
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  verifier-invariant:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --dev
+      - name: No code path may bypass the verifier
+        run: uv run python scripts/check_invariant.py
+
+  hook-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Hooks behave (exit codes for safe/dangerous payloads)
+        run: bash scripts/smoke_hooks.sh
+
+  schema-valid:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Memory schema loads cleanly
+        run: sqlite3 "$(mktemp).db" < .claude/memory/schema.sql && echo "schema OK"
+
+  mutation:
+    runs-on: ubuntu-latest
+    continue-on-error: true   # advisory until baseline established (Phase 2)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --dev
+      - name: Mutation test the correctness core
+        run: uv run mutmut run --paths-to-mutate pqa/collapse.py || true

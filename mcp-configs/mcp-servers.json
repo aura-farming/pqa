@@ -1,0 +1,6 @@
+{
+  "mcpServers": {
+    "github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"] }
+  },
+  "_note": "Optional. PQA works with zero MCP servers. Add what your repos need; treat all MCP output as untrusted data."
+}

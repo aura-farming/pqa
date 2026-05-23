@@ -1,0 +1,69 @@
+[project]
+name = "risen-pqa"
+version = "0.1.0"
+description = "Passionate Quantum Absence — co-precipitation made executable for code."
+readme = "README.md"
+requires-python = ">=3.14"
+authors = [{ name = "Lucas Daish", email = "lucas@risen.dev" }]
+dependencies = []  # the harness core is stdlib-only by design
+
+# Managed with uv (the 2026 Risen standard). Dependabot keeps these at latest.
+[dependency-groups]
+dev = [
+    "pytest>=9.0",
+    "pytest-cov>=6.0",
+    "ruff>=0.15",
+    "pyright>=1.1.409",
+    "pre-commit>=4.0",
+    "pip-audit>=2.7",
+    "mutmut>=3.0",        # mutation testing — guards against tests that pass but assert nothing
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# ----------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+# E/W pycodestyle, F pyflakes, I isort, B bugbear, UP pyupgrade, SIM simplify,
+# S flake8-bandit (security/SAST), PTH use-pathlib, RUF ruff-specific.
+select = ["E", "W", "F", "I", "B", "UP", "SIM", "S", "PTH", "RUF"]
+ignore = []
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]   # assert is expected in tests
+
+[tool.ruff.format]
+quote-style = "double"
+docstring-code-format = true
+
+# ----------------------------------------------------------------------------
+[tool.pyright]
+pythonVersion = "3.14"
+typeCheckingMode = "strict"
+include = ["pqa", "config", ".claude/hooks", "scripts"]
+reportMissingImports = true
+reportUnknownMemberType = false
+
+# ----------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers --cov=pqa --cov-report=term-missing --cov-fail-under=80"
+markers = ["integration: end-to-end tests against real git/test runners (excluded by default)"]
+
+[tool.coverage.run]
+branch = true
+source = ["pqa"]
+omit = [
+    # Phase-scaffold modules: docstring-only until implemented. Remove as each is built.
+    "pqa/superposition.py",
+    "pqa/collision.py",
+]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true

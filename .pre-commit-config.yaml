@@ -1,0 +1,39 @@
+# Local mirror of CI so problems are caught before a commit, not in the PR.
+# Install once:  uv run pre-commit install
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-added-large-files
+      - id: detect-private-key          # never commit a secret
+      - id: check-yaml
+      - id: check-json
+      - id: check-merge-conflict
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.0
+    hooks:
+      - id: ruff                        # lint
+        args: [--fix]
+      - id: ruff-format                 # format
+
+  - repo: local
+    hooks:
+      - id: pyright
+        name: pyright (strict)
+        entry: uv run pyright
+        language: system
+        types: [python]
+        pass_filenames: false
+      - id: pqa-invariant
+        name: PQA verifier invariant
+        entry: uv run python scripts/check_invariant.py
+        language: system
+        pass_filenames: false
+      - id: pqa-hook-smoke
+        name: PQA hook smoke tests
+        entry: bash scripts/smoke_hooks.sh
+        language: system
+        pass_filenames: false

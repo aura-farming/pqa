@@ -1,0 +1,40 @@
+name: security
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    - cron: "0 6 * * 1"   # weekly, so new CVEs are caught even without a push
+
+permissions:
+  contents: read
+  security-events: write   # for CodeQL upload
+
+jobs:
+  deps-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --dev
+      - name: Audit dependencies for known CVEs
+        run: uv run pip-audit
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0      # full history so secrets in any commit are caught
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+
+  codeql:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: python
+      - uses: github/codeql-action/analyze@v3

@@ -1,0 +1,11 @@
+.env
+__pycache__/
+*.pyc
+.pqa_worktrees/
+*.db
+.DS_Store
+.venv/
+.pytest_cache/
+.coverage
+.mutmut-cache/
+docs/runs/
