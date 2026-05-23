@@ -16,7 +16,7 @@ dev = [
     "pyright>=1.1.409",
     "pre-commit>=4.0",
     "pip-audit>=2.7",
-    "mutmut>=3.0",        # mutation testing — guards against tests that pass but assert nothing
+    "mutmut>=3.5.0",        # mutation testing — guards against tests that pass but assert nothing
 ]
 
 [build-system]
