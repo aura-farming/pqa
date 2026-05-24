@@ -12,7 +12,9 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-_SCHEMA = Path(__file__).resolve().parent.parent / "hooks" / "memory" / "schema.sql"
+from pqa.migrations import apply_migrations, discover_migrations
+
+_MIGRATIONS_DIR = Path(__file__).resolve().parent.parent / "hooks" / "memory" / "migrations"
 
 
 @dataclass(frozen=True)
@@ -23,13 +25,13 @@ class Failure:
 
 
 def connect(db_path: str | Path) -> sqlite3.Connection:
+    """Open the PQA memory database, applying any pending migrations. Idempotent —
+    calling this on an existing DB at the current schema version is a no-op."""
     path = Path(db_path)
-    fresh = not path.exists()
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path), timeout=5.0)
-    if fresh and _SCHEMA.exists():
-        conn.executescript(_SCHEMA.read_text())
-        conn.commit()
+    if _MIGRATIONS_DIR.exists():
+        apply_migrations(conn, discover_migrations(_MIGRATIONS_DIR))
     return conn
 
 
