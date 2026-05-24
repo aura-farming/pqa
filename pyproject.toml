@@ -67,10 +67,8 @@ markers = ["integration: end-to-end tests against real git/test runners (exclude
 [tool.coverage.run]
 branch = true
 source = ["pqa"]
-omit = [
-    # Phase-scaffold modules: docstring-only until implemented. Remove as each is built.
-    "pqa/superposition.py",
-]
+# All pqa/* modules are implemented; no scaffold omits remain.
+
 
 [tool.coverage.report]
 fail_under = 80
