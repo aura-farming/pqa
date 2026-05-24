@@ -9,29 +9,36 @@ Default is lint-only (fast, <200ms-ish) so the loop doesn't drag every edit. Tes
 are opt-in per session because a full suite after every edit is slow on big repos;
 turn them on for the collapse phase.
 """
+
+from __future__ import annotations
+
 import json
 import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 
-def read_payload() -> dict:
+def read_payload() -> dict[str, Any]:
     try:
         return json.loads(sys.stdin.read() or "{}")
-    except (json.JSONDecodeError, ValueError):
+    except json.JSONDecodeError:
         return {}
 
 
-def changed_path(payload: dict) -> str | None:
-    tool_input = payload.get("tool_input") or {}
+def changed_path(payload: dict[str, Any]) -> str | None:
+    tool_input: dict[str, Any] = payload.get("tool_input") or {}
     path = tool_input.get("file_path") or tool_input.get("path")
     return str(path) if path else None
 
 
 def run(cmd: list[str], cwd: str) -> tuple[int, str]:
     try:
-        proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=110)
+        # ruff/pytest are project-controlled tool names from the hook itself, not user input.
+        proc = subprocess.run(  # noqa: S603 — tool list is hook-controlled, not external input
+            cmd, cwd=cwd, capture_output=True, text=True, timeout=110
+        )
         return proc.returncode, (proc.stdout + proc.stderr)
     except FileNotFoundError:
         return 0, ""  # tool not installed → skip silently, don't fail the edit
@@ -41,7 +48,7 @@ def run(cmd: list[str], cwd: str) -> tuple[int, str]:
 
 def main() -> int:
     payload = read_payload()
-    cwd = payload.get("cwd") or os.getcwd()
+    cwd = payload.get("cwd") or str(Path.cwd())
     path = changed_path(payload)
     if not path or not path.endswith(".py"):
         return 0

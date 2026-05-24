@@ -241,6 +241,10 @@
     {
       "name": "cost",
       "action": "Show token spend for the current or last run via pqa-cost-governor, broken down by agent and branch."
+    },
+    {
+      "name": "dashboard",
+      "action": "Render the accumulating PQA moat via scripts/dashboard.py \u2014 precipitates, failure taxonomy, conviction calibration. Stdlib CLI, no GUI deps."
     }
   ],
   "skills": [

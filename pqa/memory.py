@@ -4,6 +4,7 @@ Three things persist across sessions: named precipitates (what won and why), the
 taxonomy (what died and why — the continuous-learning asset), and conviction signals
 (instinct-vs-reality telemetry). Frame disagreements are recorded by the harness directly.
 """
+
 from __future__ import annotations
 
 import sqlite3
@@ -11,7 +12,9 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-_SCHEMA = Path(__file__).resolve().parent.parent / "hooks" / "memory" / "schema.sql"
+from pqa.migrations import apply_migrations, discover_migrations
+
+_MIGRATIONS_DIR = Path(__file__).resolve().parent.parent / "hooks" / "memory" / "migrations"
 
 
 @dataclass(frozen=True)
@@ -22,18 +25,24 @@ class Failure:
 
 
 def connect(db_path: str | Path) -> sqlite3.Connection:
+    """Open the PQA memory database, applying any pending migrations. Idempotent —
+    calling this on an existing DB at the current schema version is a no-op."""
     path = Path(db_path)
-    fresh = not path.exists()
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path), timeout=5.0)
-    if fresh and _SCHEMA.exists():
-        conn.executescript(_SCHEMA.read_text())
-        conn.commit()
+    if _MIGRATIONS_DIR.exists():
+        apply_migrations(conn, discover_migrations(_MIGRATIONS_DIR))
     return conn
 
 
-def record_precipitate(conn: sqlite3.Connection, session: str, task: str, name: str,
-                       rationale: str, domain: str | None = None) -> None:
+def record_precipitate(
+    conn: sqlite3.Connection,
+    session: str,
+    task: str,
+    name: str,
+    rationale: str,
+    domain: str | None = None,
+) -> None:
     conn.execute(
         "INSERT INTO precipitates(session_id, task, name, rationale, domain, created_at) "
         "VALUES(?,?,?,?,?,?)",
@@ -46,7 +55,14 @@ def record_failure(conn: sqlite3.Connection, session: str, task: str, failure: F
     conn.execute(
         "INSERT INTO failures(session_id, task, approach, death_reason, conviction, created_at) "
         "VALUES(?,?,?,?,?,?)",
-        (session, task, failure.approach, failure.death_reason, failure.conviction, int(time.time())),
+        (
+            session,
+            task,
+            failure.approach,
+            failure.death_reason,
+            failure.conviction,
+            int(time.time()),
+        ),
     )
     conn.commit()
 

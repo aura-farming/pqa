@@ -1,13 +1,15 @@
 [project]
-name = "risen-pqa"
+name = "pqa"
 version = "0.1.0"
 description = "Passionate Quantum Absence — co-precipitation made executable for code."
 readme = "README.md"
 requires-python = ">=3.14"
-authors = [{ name = "Lucas Daish", email = "lucas@risen.dev" }]
+authors = [{ name = "Lucas Daish", email = "lucasdaish@outlook.com" }]
+license = "MIT"
+license-files = ["LICENSE"]
 dependencies = []  # the harness core is stdlib-only by design
 
-# Managed with uv (the 2026 Risen standard). Dependabot keeps these at latest.
+# Managed with uv. Dependabot keeps these at latest.
 [dependency-groups]
 dev = [
     "pytest>=9.0",
@@ -19,9 +21,11 @@ dev = [
     "mutmut>=3.0",        # mutation testing — guards against tests that pass but assert nothing
 ]
 
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+# PQA distributes as a Claude Code plugin (see .claude-plugin/), not a pip package.
+# uv treats this as a non-package project: dev tools install into .venv; the pqa/ engine
+# imports directly from source via the pythonpath set under [tool.pytest.ini_options].
+[tool.uv]
+package = false
 
 # ----------------------------------------------------------------------------
 [tool.ruff]
@@ -35,7 +39,11 @@ select = ["E", "W", "F", "I", "B", "UP", "SIM", "S", "PTH", "RUF"]
 ignore = []
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101"]   # assert is expected in tests
+"tests/**" = ["S101"]                       # assert is expected in tests
+"scripts/generate_components.py" = [
+    "E501",                                 # catalog of agent/skill/command descriptions — one entry per line
+    "S101",                                 # sanity assertions on the catalog at the bottom of the file
+]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -45,24 +53,22 @@ docstring-code-format = true
 [tool.pyright]
 pythonVersion = "3.14"
 typeCheckingMode = "strict"
-include = ["pqa", "config", ".claude/hooks", "scripts"]
+include = ["pqa", "config", "hooks", "scripts"]
 reportMissingImports = true
 reportUnknownMemberType = false
 
 # ----------------------------------------------------------------------------
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]   # import pqa/ directly (non-package project — see [tool.uv])
 addopts = "-q --strict-markers --cov=pqa --cov-report=term-missing --cov-fail-under=80"
 markers = ["integration: end-to-end tests against real git/test runners (excluded by default)"]
 
 [tool.coverage.run]
 branch = true
 source = ["pqa"]
-omit = [
-    # Phase-scaffold modules: docstring-only until implemented. Remove as each is built.
-    "pqa/superposition.py",
-    "pqa/collision.py",
-]
+# All pqa/* modules are implemented; no scaffold omits remain.
+
 
 [tool.coverage.report]
 fail_under = 80

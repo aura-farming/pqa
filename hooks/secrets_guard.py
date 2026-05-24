@@ -6,9 +6,13 @@ repo — so without this, a branch could read .env or a key file straight into a
 Exit code 2 blocks the read and tells the model why. Stdlib only; fails open on parse
 errors, closed on a matched secret path.
 """
+
+from __future__ import annotations
+
 import json
 import re
 import sys
+from typing import Any
 
 SECRET_PATHS = re.compile(
     r"(^|/)(\.env(\.|$)|id_rsa|id_ed25519|.*\.pem|.*\.key|credentials|\.netrc|"
@@ -17,15 +21,15 @@ SECRET_PATHS = re.compile(
 )
 
 
-def read_payload() -> dict:
+def read_payload() -> dict[str, Any]:
     try:
         return json.loads(sys.stdin.read() or "{}")
-    except (json.JSONDecodeError, ValueError):
+    except json.JSONDecodeError:
         return {}
 
 
-def target_path(payload: dict) -> str:
-    tool_input = payload.get("tool_input") or {}
+def target_path(payload: dict[str, Any]) -> str:
+    tool_input: dict[str, Any] = payload.get("tool_input") or {}
     return str(tool_input.get("file_path") or tool_input.get("path") or "")
 
 
