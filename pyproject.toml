@@ -39,11 +39,12 @@ select = ["E", "W", "F", "I", "B", "UP", "SIM", "S", "PTH", "RUF"]
 ignore = []
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101"]                       # assert is expected in tests
+"tests/**" = ["S101", "S603", "S607"]       # assert + subprocess invocations are expected in tests
 "scripts/generate_components.py" = [
     "E501",                                 # catalog of agent/skill/command descriptions — one entry per line
     "S101",                                 # sanity assertions on the catalog at the bottom of the file
 ]
+"hooks/security_gate.py" = ["E501"]         # DANGEROUS regex table reads better one entry per line
 
 [tool.ruff.format]
 quote-style = "double"

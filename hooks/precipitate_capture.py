@@ -7,6 +7,11 @@ log if the DB is unavailable. Stdlib only.
 Looks for two markers in the subagent's final text:
   conviction: high, basis: <...>        → a branch's instinct signal
   PRECIPITATE: <name> :: <why it won>   → a named, persisted insight
+
+Hardened against:
+  - attacker-controlled `transcript_path` reading arbitrary files (e.g. /etc/passwd)
+  - attacker-controlled `cwd` redirecting the SQLite write to an arbitrary location
+  - malformed payloads (silently no-ops rather than crashing)
 """
 
 from __future__ import annotations
@@ -24,16 +29,69 @@ PRECIPITATE = re.compile(r"PRECIPITATE:\s*(.+?)\s*::\s*(.+)", re.IGNORECASE)
 
 
 def read_payload() -> dict[str, Any]:
+    """Returns {} on any parse failure or non-dict payload. This hook is documented as
+    never-blocking, so we degrade silently rather than failing closed."""
     try:
-        return json.loads(sys.stdin.read() or "{}")
+        parsed: Any = json.loads(sys.stdin.read() or "{}")
     except json.JSONDecodeError:
         return {}
+    if not isinstance(parsed, dict):
+        return {}
+    return cast("dict[str, Any]", parsed)
 
 
-def last_text(transcript_path: str) -> str:
+def _is_under(child: Path, parent: Path) -> bool:
+    """Pre-3.9-compatible containment check that resolves symlinks first.
+    Returns True iff `child` (resolved) is `parent` or sits beneath it."""
+    try:
+        child_resolved = child.resolve(strict=False)
+        parent_resolved = parent.resolve(strict=False)
+    except OSError:
+        return False
+    except RuntimeError:
+        return False
+    try:
+        child_resolved.relative_to(parent_resolved)
+        return True
+    except ValueError:
+        return False
+
+
+def _safe_transcript_path(raw: object, cwd: Path) -> Path | None:
+    """Validate the transcript path before reading it.
+
+    The hook payload's transcript_path is *attacker-controllable* if any party in the
+    pipeline can set it (a compromised MCP server, a hostile subagent, or a crafted
+    payload). Without validation, Path(raw).read_text() would happily read /etc/passwd,
+    a private SSH key, or a developer's ~/.zshrc and write its content into the SQLite
+    inserts.
+
+    Only allow reading from known-safe roots:
+      - ~/.claude/  (where Claude Code stores its own transcript files)
+      - <cwd>/.claude/  (per-project Claude Code state)
+    """
+    if not isinstance(raw, str) or not raw:
+        return None
+    candidate = Path(raw)
+    allowed_roots = [Path.home() / ".claude", cwd / ".claude"]
+    if not any(_is_under(candidate, root) for root in allowed_roots):
+        return None
+    resolved = candidate.resolve(strict=False)
+    if not resolved.exists() or not resolved.is_file():
+        return None
+    # Cheap size cap: refuse files > 50 MB to avoid OOM on a poisoned transcript.
+    try:
+        if resolved.stat().st_size > 50 * 1024 * 1024:
+            return None
+    except OSError:
+        return None
+    return resolved
+
+
+def last_text(transcript_path: Path) -> str:
     """Pull the final assistant text block from a JSONL transcript, defensively."""
     try:
-        lines = Path(transcript_path).read_text().splitlines()
+        lines = transcript_path.read_text().splitlines()
     except OSError:
         return ""
     for line in reversed(lines):
@@ -60,11 +118,36 @@ def last_text(transcript_path: str) -> str:
     return ""
 
 
-def db_path(cwd: str) -> Path:
-    return Path(cwd) / ".claude" / "hooks" / "memory" / "pqa_memory.db"
+def _safe_cwd(raw: object) -> Path:
+    """Validate the working directory before using it as a DB path root.
+
+    A payload with `cwd=/tmp/evil` would otherwise let an attacker direct SQLite
+    writes to an arbitrary location. We trust `cwd` only if it resolves to an
+    existing directory we can actually use; otherwise we fall back to the
+    process's own cwd, which is set by the hook runner (Claude Code itself) and
+    not by the payload.
+    """
+    if isinstance(raw, str) and raw:
+        try:
+            candidate = Path(raw).resolve(strict=False)
+            if candidate.exists() and candidate.is_dir():
+                return candidate
+        except OSError:
+            pass
+        except RuntimeError:
+            pass
+    return Path.cwd()
 
 
-def persist(cwd: str, session: str, text: str) -> bool:
+def db_path(cwd: Path) -> Path:
+    """The DB path is always a fixed offset from the validated cwd. The path components
+    are hard-coded — no attacker-controlled segment goes into the path construction —
+    so even with a poisoned `cwd`, the worst case is writing under that directory's
+    `.claude/hooks/memory/` subtree, which is the legitimate location."""
+    return cwd / ".claude" / "hooks" / "memory" / "pqa_memory.db"
+
+
+def persist(cwd: Path, session: str, text: str) -> bool:
     path = db_path(cwd)
     if not path.exists():
         return False  # schema not initialised yet → fall back to log
@@ -89,7 +172,7 @@ def persist(cwd: str, session: str, text: str) -> bool:
         return False
 
 
-def fallback_log(cwd: str, session: str, text: str) -> None:
+def fallback_log(cwd: Path, session: str, text: str) -> None:
     record = {
         "ts": int(time.time()),
         "session": session,
@@ -103,7 +186,7 @@ def fallback_log(cwd: str, session: str, text: str) -> None:
     }
     if not record["precipitates"] and not record["signals"]:
         return
-    log = Path(cwd) / ".claude" / "memory" / "capture_fallback.jsonl"
+    log = cwd / ".claude" / "memory" / "capture_fallback.jsonl"
     log.parent.mkdir(parents=True, exist_ok=True)
     with log.open("a") as fh:
         fh.write(json.dumps(record) + "\n")
@@ -111,9 +194,12 @@ def fallback_log(cwd: str, session: str, text: str) -> None:
 
 def main() -> int:
     payload = read_payload()
-    cwd = payload.get("cwd") or str(Path.cwd())
+    cwd = _safe_cwd(payload.get("cwd"))
     session = str(payload.get("session_id", "unknown"))
-    text = last_text(str(payload.get("transcript_path", "")))
+
+    transcript = _safe_transcript_path(payload.get("transcript_path"), cwd)
+    text = last_text(transcript) if transcript else ""
+
     if text and not persist(cwd, session, text):
         fallback_log(cwd, session, text)
     return 0  # never block
