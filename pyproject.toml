@@ -5,6 +5,8 @@ description = "Passionate Quantum Absence — co-precipitation made executable f
 readme = "README.md"
 requires-python = ">=3.14"
 authors = [{ name = "Lucas Daish", email = "lucasdaish@outlook.com" }]
+license = "MIT"
+license-files = ["LICENSE"]
 dependencies = []  # the harness core is stdlib-only by design
 
 # Managed with uv. Dependabot keeps these at latest.
