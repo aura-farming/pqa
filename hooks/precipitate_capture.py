@@ -8,22 +8,25 @@ Looks for two markers in the subagent's final text:
   conviction: high, basis: <...>        → a branch's instinct signal
   PRECIPITATE: <name> :: <why it won>   → a named, persisted insight
 """
+
+from __future__ import annotations
+
 import json
-import os
 import re
 import sqlite3
 import sys
 import time
 from pathlib import Path
+from typing import Any, cast
 
 CONVICTION = re.compile(r"conviction:\s*(high|medium|low)\s*,\s*basis:\s*(.+)", re.IGNORECASE)
 PRECIPITATE = re.compile(r"PRECIPITATE:\s*(.+?)\s*::\s*(.+)", re.IGNORECASE)
 
 
-def read_payload() -> dict:
+def read_payload() -> dict[str, Any]:
     try:
         return json.loads(sys.stdin.read() or "{}")
-    except (json.JSONDecodeError, ValueError):
+    except json.JSONDecodeError:
         return {}
 
 
@@ -35,15 +38,24 @@ def last_text(transcript_path: str) -> str:
         return ""
     for line in reversed(lines):
         try:
-            entry = json.loads(line)
-        except (json.JSONDecodeError, ValueError):
+            entry: dict[str, Any] = json.loads(line)
+        except json.JSONDecodeError:
             continue
-        msg = entry.get("message", {})
+        msg_raw = entry.get("message")
+        if not isinstance(msg_raw, dict):
+            continue
+        msg = cast(dict[str, Any], msg_raw)
         if msg.get("role") != "assistant":
             continue
         content = msg.get("content", "")
         if isinstance(content, list):
-            return " ".join(b.get("text", "") for b in content if isinstance(b, dict))
+            blocks = cast(list[Any], content)
+            parts: list[str] = []
+            for b in blocks:
+                if isinstance(b, dict):
+                    block = cast(dict[str, Any], b)
+                    parts.append(str(block.get("text", "")))
+            return " ".join(parts)
         return str(content)
     return ""
 
@@ -68,8 +80,7 @@ def persist(cwd: str, session: str, text: str) -> bool:
                 )
             for level, basis in CONVICTION.findall(text):
                 conn.execute(
-                    "INSERT INTO signals(session_id, level, basis, created_at) "
-                    "VALUES(?,?,?,?)",
+                    "INSERT INTO signals(session_id, level, basis, created_at) VALUES(?,?,?,?)",
                     (session, level.lower(), basis.strip(), ts),
                 )
         conn.close()
@@ -82,8 +93,13 @@ def fallback_log(cwd: str, session: str, text: str) -> None:
     record = {
         "ts": int(time.time()),
         "session": session,
-        "precipitates": [{"name": n.strip(), "why": w.strip()} for n, w in PRECIPITATE.findall(text)],
-        "signals": [{"level": l.lower(), "basis": b.strip()} for l, b in CONVICTION.findall(text)],
+        "precipitates": [
+            {"name": n.strip(), "why": w.strip()} for n, w in PRECIPITATE.findall(text)
+        ],
+        "signals": [
+            {"level": level.lower(), "basis": basis.strip()}
+            for level, basis in CONVICTION.findall(text)
+        ],
     }
     if not record["precipitates"] and not record["signals"]:
         return
@@ -95,7 +111,7 @@ def fallback_log(cwd: str, session: str, text: str) -> None:
 
 def main() -> int:
     payload = read_payload()
-    cwd = payload.get("cwd") or os.getcwd()
+    cwd = payload.get("cwd") or str(Path.cwd())
     session = str(payload.get("session_id", "unknown"))
     text = last_text(str(payload.get("transcript_path", "")))
     if text and not persist(cwd, session, text):

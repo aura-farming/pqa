@@ -99,7 +99,7 @@ are off. In auto mode they complement the classifier; in bypass mode they are yo
 No API key is needed — PQA runs on the user's Claude Code subscription via the project- or
 user-scope install.
 
-## Build constraints (Risen standard)
+## Build constraints
 
 Python 3.14+, stdlib first. Hooks stdlib-only, <200ms. Type hints everywhere. Functions
 under 30 lines. One concern per file. Secrets only via env; never in a prompt, branch, or

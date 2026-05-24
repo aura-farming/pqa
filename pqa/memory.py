@@ -4,6 +4,7 @@ Three things persist across sessions: named precipitates (what won and why), the
 taxonomy (what died and why — the continuous-learning asset), and conviction signals
 (instinct-vs-reality telemetry). Frame disagreements are recorded by the harness directly.
 """
+
 from __future__ import annotations
 
 import sqlite3
@@ -32,8 +33,14 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
     return conn
 
 
-def record_precipitate(conn: sqlite3.Connection, session: str, task: str, name: str,
-                       rationale: str, domain: str | None = None) -> None:
+def record_precipitate(
+    conn: sqlite3.Connection,
+    session: str,
+    task: str,
+    name: str,
+    rationale: str,
+    domain: str | None = None,
+) -> None:
     conn.execute(
         "INSERT INTO precipitates(session_id, task, name, rationale, domain, created_at) "
         "VALUES(?,?,?,?,?,?)",
@@ -46,7 +53,14 @@ def record_failure(conn: sqlite3.Connection, session: str, task: str, failure: F
     conn.execute(
         "INSERT INTO failures(session_id, task, approach, death_reason, conviction, created_at) "
         "VALUES(?,?,?,?,?,?)",
-        (session, task, failure.approach, failure.death_reason, failure.conviction, int(time.time())),
+        (
+            session,
+            task,
+            failure.approach,
+            failure.death_reason,
+            failure.conviction,
+            int(time.time()),
+        ),
     )
     conn.commit()
 
