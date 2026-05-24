@@ -36,6 +36,7 @@ from pqa.cost import Budget  # noqa: E402
 from pqa.frame import Frame  # noqa: E402
 from pqa.memory import connect  # noqa: E402
 from pqa.orchestrator import VerifyResult, run  # noqa: E402
+from pqa.report import write_report  # noqa: E402
 from pqa.superposition import Branch  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -187,6 +188,13 @@ def main() -> int:
 
         _print_report(report)
         _print_persistence(conn)
+
+        # Persist the run artefact next to the temp DB so the operator can study it
+        # after the demo exits. Writes report.json + report.md + branches/*.txt.
+        artefact_root = _REPO_ROOT / "artefacts"
+        artefact = write_report(report, artefact_root)
+        _print_artefact(artefact)
+
         conn.close()
 
     print()
@@ -223,6 +231,17 @@ def _print_report(report) -> None:
     print()
     print("  cost report:")
     print(indent(report.cost_report, "    "))
+
+
+def _print_artefact(artefact) -> None:
+    print()
+    print("Artefact written")
+    print("-" * 78)
+    print(f"  directory : {artefact.artefact_dir}")
+    print(f"  json      : {artefact.json_path}")
+    print(f"  markdown  : {artefact.markdown_path}")
+    print()
+    print(f"  Inspect with:  cat {artefact.markdown_path}")
 
 
 def _print_persistence(conn) -> None:
