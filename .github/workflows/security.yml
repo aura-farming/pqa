@@ -2,36 +2,60 @@ name: security
 on:
   push:
     branches: [main, develop]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - '.gitignore'
+      - 'LICENSE'
   pull_request:
     branches: [main, develop]
   schedule:
-    - cron: "0 6 * * 1"   # weekly, so new CVEs are caught even without a push
+    - cron: "0 6 * * 1"   # weekly Monday 06:00 UTC — catch new CVEs without a push
+  workflow_dispatch:        # manual trigger for incident response
 
 permissions:
   contents: read
-  security-events: write   # for CodeQL upload
+  security-events: write   # CodeQL needs to upload SARIF
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   deps-audit:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - run: uv sync --dev
+        with:
+          enable-cache: true   # was missing — same uv image as ci.yml so cache is hot
+      - run: uv sync --dev --frozen
       - name: Audit dependencies for known CVEs
         run: uv run pip-audit
 
   secret-scan:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0      # full history so secrets in any commit are caught
+          fetch-depth: 0       # full history so secrets in any commit are caught
       - name: Gitleaks
         uses: gitleaks/gitleaks-action@v2
 
+  # CodeQL is the expensive one (5-10 min/run). It does NOT block PRs and does not need to
+  # run on every push to a feature branch. Restrict to the integration branches + weekly +
+  # manual dispatch. Per-PR coverage comes from gitleaks + pip-audit, which are fast.
   codeql:
+    if: >-
+      github.event_name == 'schedule'
+      || github.event_name == 'workflow_dispatch'
+      || (github.event_name == 'push' && contains(fromJSON('["main", "develop"]'), github.ref_name))
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: github/codeql-action/init@v3
