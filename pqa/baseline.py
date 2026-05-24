@@ -21,6 +21,14 @@ Verdict = Literal["pqa_wins", "baseline_wins", "tie"]
 # Tuned so a whitespace/style reformat still counts as "same algorithm".
 DIFFERENT_BELOW = 0.85
 
+# Cost-regression threshold: even a different working solution loses to the baseline
+# in the token-cost dimension if PQA spent more than this multiple of the baseline's
+# token cost. Tuned conservatively — PQA SHOULD cost more than single-pass (it runs N
+# branches + adversary + verifier), but if it costs N+1x more without proportionate
+# quality gain, the trade-off is bad. A team comparing PQA-vs-single-pass should be
+# allowed to see this in the verdict, not have it buried in a delta column.
+COST_REGRESSION_FACTOR = 10.0
+
 
 @dataclass(frozen=True)
 class Baseline:
@@ -98,17 +106,39 @@ def _similarity(a: str, b: str) -> float:
     return difflib.SequenceMatcher(None, "".join(a.split()), "".join(b.split())).ratio()
 
 
+def _is_cost_regression(baseline_tokens: int, pqa_tokens: int) -> bool:
+    """True iff PQA spent more than COST_REGRESSION_FACTOR x the baseline. A working
+    PQA solution that costs 50x more than the single-pass baseline is not a clean
+    'win' — the operator should see the cost overhead in the verdict rather than
+    finding it later in a token-delta column."""
+    if baseline_tokens <= 0:
+        # Without a positive baseline cost we cannot compute the ratio honestly.
+        return False
+    return pqa_tokens > baseline_tokens * COST_REGRESSION_FACTOR
+
+
 def _decide(
-    baseline_passes: bool, pqa_passes: bool, responses_different: bool
+    baseline_passes: bool,
+    pqa_passes: bool,
+    responses_different: bool,
+    cost_regression: bool,
 ) -> tuple[Verdict, str]:
     if not baseline_passes and not pqa_passes:
         return "baseline_wins", "neither passed tests — PQA spend was wasted"
     if pqa_passes and not baseline_passes:
+        # Even a cost-regressed win is still a win when single-pass produced nothing
+        # workable — solving the problem at all is the dominant signal.
         return "pqa_wins", "PQA found a working solution that single-pass missed"
     if baseline_passes and not pqa_passes:
         return "baseline_wins", "regression: PQA broke a working baseline"
     if not responses_different:
         return "tie", "both passed but converged on the same solution — PQA spend was overhead"
+    if cost_regression:
+        return (
+            "tie",
+            "both passed with different solutions but PQA cost > "
+            f"{COST_REGRESSION_FACTOR:.0f}x the baseline — quality gain did not justify spend",
+        )
     return (
         "pqa_wins",
         "both passed and PQA produced a demonstrably different (non-obvious) solution",
@@ -124,7 +154,10 @@ def compare(
 ) -> Comparison:
     similarity = _similarity(baseline.response, pqa_response)
     responses_different = similarity < DIFFERENT_BELOW
-    verdict, rationale = _decide(baseline.tests_pass, pqa_tests_pass, responses_different)
+    cost_regression = _is_cost_regression(baseline.tokens_used, pqa_tokens_used)
+    verdict, rationale = _decide(
+        baseline.tests_pass, pqa_tests_pass, responses_different, cost_regression
+    )
     return Comparison(
         task=baseline.task,
         baseline=baseline,
