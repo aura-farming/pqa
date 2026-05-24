@@ -18,7 +18,7 @@ from pqa.collision import Finding
 from pqa.cost import Budget
 from pqa.frame import Frame
 from pqa.memory import connect
-from pqa.orchestrator import RunReport, VerifyResult, run
+from pqa.orchestrator import HumanCheckpoints, RunReport, VerifyResult, run
 from pqa.superposition import Branch
 
 # ---------------------------------------------------------------------------
@@ -481,6 +481,220 @@ def test_report_is_immutable(conn: sqlite3.Connection):
     )
     with pytest.raises((AttributeError, TypeError)):
         report.task = "changed"  # type: ignore[misc]
+
+
+# ---------------------------------------------------------------------------
+# Human checkpoint (Gap #9)
+
+
+def test_no_checkpoints_runs_normally(conn: sqlite3.Connection):
+    """Sanity: passing checkpoints=None matches the no-checkpoint default."""
+    report = run(
+        task="t",
+        session_id="s",
+        base_prompt="x",
+        research=_research(),
+        selfeval=_selfeval(),
+        generator=_make_generator(_divergent_outputs()),
+        adversary=_make_adversary([]),
+        verifier=_make_verifier({"b0": VerifyResult(has_tests=True, verified=True, coverage=80.0)}),
+        budget=Budget(max_usd=10.0),
+        conn=conn,
+        checkpoints=None,
+    )
+    assert report.aborted is False
+
+
+def test_frame_checkpoint_returning_none_proceeds(conn: sqlite3.Connection):
+    seen: list[tuple] = []
+
+    def on_frame(research, selfeval, disagreement):
+        seen.append((research.type, selfeval.type, disagreement is not None))
+        return None
+
+    report = run(
+        task="t",
+        session_id="s",
+        base_prompt="x",
+        research=_research(),
+        selfeval=_selfeval(),
+        generator=_make_generator(_divergent_outputs()),
+        adversary=_make_adversary([]),
+        verifier=_make_verifier({"b0": VerifyResult(has_tests=True, verified=True, coverage=80.0)}),
+        budget=Budget(max_usd=10.0),
+        conn=conn,
+        checkpoints=HumanCheckpoints(on_frame=on_frame),
+    )
+    assert report.aborted is False
+    assert len(seen) == 1
+    assert seen[0] == ("research", "selfeval", True)
+
+
+def test_frame_checkpoint_returning_reason_aborts(conn: sqlite3.Connection):
+    generator_calls: list[Branch] = []
+
+    def tracking_generator(branch):
+        generator_calls.append(branch)
+        return _make_generator(_divergent_outputs())(branch)
+
+    report = run(
+        task="t",
+        session_id="s",
+        base_prompt="x",
+        research=_research(),
+        selfeval=_selfeval(),
+        generator=tracking_generator,
+        adversary=_make_adversary([]),
+        verifier=_make_verifier({}),
+        budget=Budget(max_usd=10.0),
+        conn=conn,
+        checkpoints=HumanCheckpoints(
+            on_frame=lambda *_: "operator says: missing the tenant boundary"
+        ),
+    )
+    assert report.aborted is True
+    assert report.abort_reason is not None
+    assert "human checkpoint" in report.abort_reason.lower()
+    assert "missing the tenant boundary" in report.abort_reason
+    assert generator_calls == []
+
+
+def test_frame_checkpoint_records_frame_even_on_abort(conn: sqlite3.Connection):
+    """The failure taxonomy needs to know about rejected gates too."""
+    run(
+        task="t",
+        session_id="s",
+        base_prompt="x",
+        research=_research(),
+        selfeval=_selfeval(),
+        generator=_make_generator(_divergent_outputs()),
+        adversary=_make_adversary([]),
+        verifier=_make_verifier({}),
+        budget=Budget(max_usd=10.0),
+        conn=conn,
+        checkpoints=HumanCheckpoints(on_frame=lambda *_: "nope"),
+    )
+    rows = conn.execute("SELECT COUNT(*) FROM frames").fetchone()
+    assert rows[0] == 1
+
+
+def test_pre_collapse_checkpoint_proceeds_on_none(conn: sqlite3.Connection):
+    def on_pre_collapse(branches, findings, branch_results):
+        assert len(branches) == 2
+        return None
+
+    report = run(
+        task="t",
+        session_id="s",
+        base_prompt="x",
+        research=_research(),
+        selfeval=_selfeval(),
+        generator=_make_generator(_divergent_outputs()),
+        adversary=_make_adversary([]),
+        verifier=_make_verifier({"b0": VerifyResult(has_tests=True, verified=True, coverage=80.0)}),
+        budget=Budget(max_usd=10.0),
+        conn=conn,
+        checkpoints=HumanCheckpoints(on_pre_collapse=on_pre_collapse),
+    )
+    assert report.aborted is False
+    assert report.survivor is not None
+
+
+def test_pre_collapse_checkpoint_aborts_with_reason(conn: sqlite3.Connection):
+    report = run(
+        task="t",
+        session_id="s",
+        base_prompt="x",
+        research=_research(),
+        selfeval=_selfeval(),
+        generator=_make_generator(_divergent_outputs()),
+        adversary=_make_adversary([]),
+        verifier=_make_verifier({"b0": VerifyResult(has_tests=True, verified=True, coverage=80.0)}),
+        budget=Budget(max_usd=10.0),
+        conn=conn,
+        checkpoints=HumanCheckpoints(
+            on_pre_collapse=lambda *_: "operator: b0 breaks the tenant contract"
+        ),
+    )
+    assert report.aborted is True
+    assert report.abort_reason is not None
+    assert "pre-collapse" in report.abort_reason
+    assert "b0 breaks the tenant contract" in report.abort_reason
+    assert report.survivor is None
+    precipitates = conn.execute("SELECT COUNT(*) FROM precipitates").fetchone()[0]
+    assert precipitates == 0
+
+
+def test_both_checkpoints_invoked_when_neither_aborts(conn: sqlite3.Connection):
+    invocations: list[str] = []
+
+    def on_frame(*_args):
+        invocations.append("frame")
+        return None
+
+    def on_pre_collapse(*_args):
+        invocations.append("pre-collapse")
+        return None
+
+    report = run(
+        task="t",
+        session_id="s",
+        base_prompt="x",
+        research=_research(),
+        selfeval=_selfeval(),
+        generator=_make_generator(_divergent_outputs()),
+        adversary=_make_adversary([]),
+        verifier=_make_verifier({"b0": VerifyResult(has_tests=True, verified=True, coverage=80.0)}),
+        budget=Budget(max_usd=10.0),
+        conn=conn,
+        checkpoints=HumanCheckpoints(on_frame=on_frame, on_pre_collapse=on_pre_collapse),
+    )
+    assert report.aborted is False
+    assert invocations == ["frame", "pre-collapse"]
+
+
+def test_pre_collapse_checkpoint_receives_branch_results(conn: sqlite3.Connection):
+    received: dict[str, int] = {}
+
+    def on_pre_collapse(branches, findings, branch_results):
+        received["n_branches"] = len(branches)
+        received["n_findings"] = len(findings)
+        received["n_results"] = len(branch_results)
+        return None
+
+    run(
+        task="t",
+        session_id="s",
+        base_prompt="x",
+        research=_research(),
+        selfeval=_selfeval(),
+        generator=_make_generator(_divergent_outputs()),
+        adversary=_make_adversary(
+            [
+                Finding(
+                    branch_id="b0",
+                    severity="low",
+                    category="style",
+                    title="x",
+                    detail="d",
+                    resolved=True,
+                )
+            ]
+        ),
+        verifier=_make_verifier({}),
+        budget=Budget(max_usd=10.0),
+        conn=conn,
+        checkpoints=HumanCheckpoints(on_pre_collapse=on_pre_collapse),
+    )
+    assert received["n_branches"] == 2
+    assert received["n_findings"] == 1
+    assert received["n_results"] == 2
+
+
+def test_human_checkpoints_is_immutable():
+    cp = HumanCheckpoints(on_frame=None, on_pre_collapse=None)
+    with pytest.raises((AttributeError, TypeError)):
+        cp.on_frame = lambda *_: None  # type: ignore[misc]
 
 
 def test_timestamps_are_set(conn: sqlite3.Connection):
