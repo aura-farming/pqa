@@ -63,3 +63,31 @@ CREATE TABLE IF NOT EXISTS instincts (
     UNIQUE(name)
 );
 CREATE INDEX IF NOT EXISTS idx_instincts_conf ON instincts(confidence DESC);
+
+-- Single-pass baselines: the first-attempt solution for each task, used as the
+-- side-by-side measurement for PQA's converged answer. Without storing this, the
+-- "PQA beats single-pass" claim is unmeasurable.
+CREATE TABLE IF NOT EXISTS baselines (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    task          TEXT    NOT NULL,
+    response      TEXT    NOT NULL,
+    tokens_used   INTEGER NOT NULL,
+    tests_pass    INTEGER NOT NULL,   -- 0/1
+    coverage      REAL,               -- nullable when no suite ran
+    created_at    INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_baselines_task ON baselines(task, created_at DESC);
+
+-- Per-run cost telemetry: a snapshot of cost-governor state at run end. Used to
+-- watch the cost-per-converged-task trend and to flag economically broken runs.
+CREATE TABLE IF NOT EXISTS cost_runs (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id    TEXT    NOT NULL,
+    task          TEXT,
+    total_cost    REAL    NOT NULL,
+    budget_usd    REAL    NOT NULL,
+    status        TEXT    NOT NULL,   -- ok | warn | abort
+    branches      INTEGER NOT NULL,
+    created_at    INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cost_runs_session ON cost_runs(session_id);
