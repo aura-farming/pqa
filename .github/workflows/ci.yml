@@ -2,50 +2,62 @@ name: ci
 on:
   push:
     branches: [main, develop]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - '.gitignore'
+      - 'LICENSE'
   pull_request:
     branches: [main, develop]
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Saves on Dependabot churn and WIP work: draft PRs do not burn minutes.
 jobs:
   lint:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-      - run: uv sync --dev
+      - run: uv sync --dev --frozen
       - name: Ruff lint
         run: uv run ruff check .
       - name: Ruff format check
         run: uv run ruff format --check .
 
   types:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-      - run: uv sync --dev
+      - run: uv sync --dev --frozen
       - name: Pyright (strict)
         run: uv run pyright
 
   test:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     strategy:
-      fail-fast: false
+      fail-fast: true       # stop the matrix as soon as one cell fails — saves minutes
       matrix:
-        python: ["3.14"]      # add "3.15" here when it ships to test ahead
+        python: ["3.14"]    # add "3.15" here when it ships to test ahead
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
       - run: uv python install ${{ matrix.python }}
-      - run: uv sync --dev
+      - run: uv sync --dev --frozen
       - name: Pytest + coverage (fails under 80%)
         run: uv run pytest

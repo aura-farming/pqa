@@ -1,0 +1,48 @@
+name: mutation
+# Mutation testing is expensive (~3-5 min per run, grows with the correctness core size).
+# It is advisory (continue-on-error) and is NOT a required check, so running it on every
+# push to every feature branch wastes minutes. This workflow runs it only when it pays:
+#
+#   - weekly on a schedule (catches latent dead-test regressions)
+#   - on push to main/develop (after merge, where it matters)
+#   - on PRs explicitly labelled `run-mutation` (when an author wants it)
+#   - on manual workflow_dispatch (incident response or release gating)
+#
+# When the baseline is established (Phase 2), flip continue-on-error to false to make it
+# blocking on the integration branches.
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'pqa/**'
+      - 'tests/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/mutation.yml'
+  pull_request:
+    types: [labeled, synchronize, opened, reopened]
+  schedule:
+    - cron: "0 7 * * 0"   # weekly Sunday 07:00 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: mutation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mutation:
+    # Only run on PRs that have the `run-mutation` label; always run on the other triggers.
+    if: >-
+      github.event_name != 'pull_request'
+      || contains(github.event.pull_request.labels.*.name, 'run-mutation')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true   # advisory until Phase 2 baseline is established
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --dev --frozen
+      - name: Mutation test the correctness core
+        run: uv run mutmut run --paths-to-mutate pqa/collapse.py || true
