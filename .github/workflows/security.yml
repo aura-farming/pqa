@@ -45,6 +45,8 @@ jobs:
           fetch-depth: 0       # full history so secrets in any commit are caught
       - name: Gitleaks
         uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # required by v2 to scan PR diffs
 
   # CodeQL is the expensive one (5-10 min/run). It does NOT block PRs and does not need to
   # run on every push to a feature branch. Restrict to the integration branches + weekly +
