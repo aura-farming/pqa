@@ -5,6 +5,7 @@ eloquence never. A branch is accepted only if it passed verification; conviction
 nothing here. Among verified branches, the survivor resolves the most adversary findings;
 ties break toward the less incremental branch (the quantum jump).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -13,22 +14,23 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class BranchResult:
     """Objective outcome for one branch after collision + verification."""
+
     name: str
-    verified: bool                 # passed the real test suite
-    has_tests: bool                # whether a suite existed to verify against
-    coverage: float | None         # % coverage, or None if unmeasured
-    findings_resolved: int         # adversary findings this branch withstands/handles
-    findings_total: int            # adversary findings raised against it
-    conviction: str | None         # high/medium/low/None — telemetry only, never decisive
-    incremental: bool              # True = safe/obvious; False = bigger swing
+    verified: bool  # passed the real test suite
+    has_tests: bool  # whether a suite existed to verify against
+    coverage: float | None  # % coverage, or None if unmeasured
+    findings_resolved: int  # adversary findings this branch withstands/handles
+    findings_total: int  # adversary findings raised against it
+    conviction: str | None  # high/medium/low/None — telemetry only, never decisive
+    incremental: bool  # True = safe/obvious; False = bigger swing
 
 
 @dataclass(frozen=True)
 class CollapseOutcome:
     survivor: BranchResult | None
     reason: str
-    unverified: bool               # True when no branch could be tested
-    confidence: str                # human-readable qualifier on the result
+    unverified: bool  # True when no branch could be tested
+    confidence: str  # human-readable qualifier on the result
 
 
 def _confidence(branch: BranchResult) -> str:
@@ -55,12 +57,18 @@ def select_survivor(results: list[BranchResult]) -> CollapseOutcome:
         verified = [b for b in results if b.verified]
         if not verified:
             return CollapseOutcome(
-                None, "all branches failed verification", False,
+                None,
+                "all branches failed verification",
+                False,
                 "no survivor — every branch failed its tests",
             )
         winner = max(verified, key=_rank_key)
-        return CollapseOutcome(winner, "survived attack and passed tests", False, _confidence(winner))
+        return CollapseOutcome(
+            winner, "survived attack and passed tests", False, _confidence(winner)
+        )
 
     # No suite anywhere: collapse on adversary findings only, clearly flagged.
     winner = max(results, key=lambda b: (b.findings_resolved, 0 if b.incremental else 1))
-    return CollapseOutcome(winner, "no test suite; chosen on adversary findings", True, _confidence(winner))
+    return CollapseOutcome(
+        winner, "no test suite; chosen on adversary findings", True, _confidence(winner)
+    )

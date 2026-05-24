@@ -7,9 +7,14 @@ Soft gate: it injects guidance (stdout is added to context) rather than blocking
 never gets in the way of quick questions. It only fires on prompts that look like a build.
 Stdlib only; always exits 0.
 """
+
+from __future__ import annotations
+
+import contextlib
 import json
 import re
 import sys
+from typing import Any
 
 BUILD_INTENT = re.compile(
     r"\b(build|implement|design|architect|create|refactor|write|add|fix|optimi[sz]e|"
@@ -27,10 +32,10 @@ PROTOCOL = (
 )
 
 
-def read_payload() -> dict:
+def read_payload() -> dict[str, Any]:
     try:
         return json.loads(sys.stdin.read() or "{}")
-    except (json.JSONDecodeError, ValueError):
+    except json.JSONDecodeError:
         return {}
 
 
@@ -39,10 +44,8 @@ def main() -> int:
     prompt = str(payload.get("prompt", ""))
     if BUILD_INTENT.search(prompt):
         # stdout from a UserPromptSubmit hook is added to the model's context.
-        try:
+        with contextlib.suppress(BrokenPipeError):
             print(PROTOCOL)
-        except BrokenPipeError:
-            pass
     return 0
 
 

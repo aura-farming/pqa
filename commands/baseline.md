@@ -1,5 +1,5 @@
 ---
-description: Produce the single-pass baseline via pqa-baseline-runner and store it for the side-by-side, so the loop's result can be 
+description: Produce the single-pass baseline via pqa-baseline-runner and store it for the side-by-side, so the loop's result can be
 argument-hint: <task>
 ---
 

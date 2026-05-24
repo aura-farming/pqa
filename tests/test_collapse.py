@@ -3,12 +3,23 @@
 These encode the non-negotiable rules: conviction never beats verification; all-fail yields
 no survivor; ties break to the bigger swing; no-suite yields an UNVERIFIED result.
 """
+
 from pqa.collapse import BranchResult, select_survivor
 
 
-def _branch(name, verified=True, has_tests=True, coverage=80.0,
-            resolved=5, total=5, conviction=None, incremental=True):
-    return BranchResult(name, verified, has_tests, coverage, resolved, total, conviction, incremental)
+def _branch(
+    name,
+    verified=True,
+    has_tests=True,
+    coverage=80.0,
+    resolved=5,
+    total=5,
+    conviction=None,
+    incremental=True,
+):
+    return BranchResult(
+        name, verified, has_tests, coverage, resolved, total, conviction, incremental
+    )
 
 
 def test_unverified_high_conviction_loses_to_verified_plain():
@@ -21,10 +32,12 @@ def test_unverified_high_conviction_loses_to_verified_plain():
 
 
 def test_all_branches_fail_yields_no_survivor():
-    outcome = select_survivor([
-        _branch("a", verified=False),
-        _branch("b", verified=False),
-    ])
+    outcome = select_survivor(
+        [
+            _branch("a", verified=False),
+            _branch("b", verified=False),
+        ]
+    )
     assert outcome.survivor is None
     assert "failed" in outcome.reason
 
@@ -43,10 +56,12 @@ def test_more_resolved_findings_wins():
 
 
 def test_no_test_suite_is_flagged_unverified():
-    outcome = select_survivor([
-        _branch("a", has_tests=False, coverage=None, resolved=3),
-        _branch("b", has_tests=False, coverage=None, resolved=5),
-    ])
+    outcome = select_survivor(
+        [
+            _branch("a", has_tests=False, coverage=None, resolved=3),
+            _branch("b", has_tests=False, coverage=None, resolved=5),
+        ]
+    )
     assert outcome.unverified is True
     assert outcome.survivor.name == "b"
     assert "UNVERIFIED" in outcome.confidence

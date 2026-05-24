@@ -1,4 +1,5 @@
 """Tests for conviction signal parsing."""
+
 from pqa.signals import parse_conviction
 
 

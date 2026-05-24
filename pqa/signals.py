@@ -6,6 +6,7 @@ This is instinct telemetry. It protects a branch from early pruning during colli
 never promotes a branch past verification. Parsing it is all this module does — the policy
 ('protect, don't exempt') lives in the orchestrator and collapse logic.
 """
+
 from __future__ import annotations
 
 import re
@@ -17,8 +18,8 @@ _LEVELS = {"high", "medium", "low"}
 
 @dataclass(frozen=True)
 class Conviction:
-    level: str       # high | medium | low
-    basis: str       # the stated non-obvious reason
+    level: str  # high | medium | low
+    basis: str  # the stated non-obvious reason
 
     @property
     def protects_from_pruning(self) -> bool:
