@@ -70,7 +70,6 @@ source = ["pqa"]
 omit = [
     # Phase-scaffold modules: docstring-only until implemented. Remove as each is built.
     "pqa/superposition.py",
-    "pqa/collision.py",
 ]
 
 [tool.coverage.report]
