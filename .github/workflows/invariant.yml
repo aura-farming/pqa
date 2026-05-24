@@ -30,7 +30,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Memory schema loads cleanly
-        run: sqlite3 "$(mktemp).db" < .claude/memory/schema.sql && echo "schema OK"
+        run: sqlite3 "$(mktemp).db" < hooks/memory/schema.sql && echo "schema OK"
 
   mutation:
     runs-on: ubuntu-latest
