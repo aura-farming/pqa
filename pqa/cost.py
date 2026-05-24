@@ -78,39 +78,63 @@ class CostGovernor:
         with self._lock:
             return dict(self._per_branch)
 
-    def total(self) -> Spend:
+    def _snapshot_under_lock(self) -> tuple[Spend, dict[str, Spend], Status]:
+        """Compute every observable in a single lock acquisition. Eliminates the
+        TOCTOU race where another thread can record spend between sequential
+        lock acquisitions in `status()` / `total()` / `report()`."""
         with self._lock:
+            per_branch_copy = dict(self._per_branch)
             spends = list(self._per_branch.values())
-        return Spend(
+        total = Spend(
             input_tokens=sum(s.input_tokens for s in spends),
             output_tokens=sum(s.output_tokens for s in spends),
             cost_usd=sum(s.cost_usd for s in spends),
         )
+        status = self._status_from(total.cost_usd)
+        return total, per_branch_copy, status
 
-    def status(self) -> Status:
-        spent = self.total().cost_usd
+    def _status_from(self, spent: float) -> Status:
+        """Pure function: classify a known cost against the budget. No lock needed
+        because the input is already a snapshot."""
         if spent >= self._budget.max_usd:
             return "abort"
         if spent >= self._budget.max_usd * self._budget.warn_at:
             return "warn"
         return "ok"
 
+    def total(self) -> Spend:
+        total, _per_branch, _status = self._snapshot_under_lock()
+        return total
+
+    def status(self) -> Status:
+        _total, _per_branch, status = self._snapshot_under_lock()
+        return status
+
     def should_abort(self) -> bool:
-        return self.status() == "abort"
+        """Single atomic check used in the hot abort path. Acquires the lock
+        once — no gap between reading the total and gating on it."""
+        _total, _per_branch, status = self._snapshot_under_lock()
+        return status == "abort"
 
     def remaining_usd(self) -> float:
-        return max(0.0, self._budget.max_usd - self.total().cost_usd)
+        total, _per_branch, _status = self._snapshot_under_lock()
+        return max(0.0, self._budget.max_usd - total.cost_usd)
 
     def report(self) -> str:
-        total = self.total()
+        """Single-snapshot report so the displayed status, total, remaining, and
+        per-branch breakdown are all consistent with each other. Previously the
+        report could show status=ok while the snapshot already reflected abort,
+        because each component was queried under a separate lock acquisition."""
+        total, per_branch_copy, status = self._snapshot_under_lock()
+        remaining = max(0.0, self._budget.max_usd - total.cost_usd)
         lines = [
-            f"status: {self.status()}",
+            f"status: {status}",
             f"spent: ${total.cost_usd:.4f} of ${self._budget.max_usd:.2f}",
-            f"remaining: ${self.remaining_usd():.4f}",
+            f"remaining: ${remaining:.4f}",
             f"tokens: in={total.input_tokens:,}, out={total.output_tokens:,}",
             "branches:",
         ]
-        for branch_id, spend in sorted(self.per_branch().items()):
+        for branch_id, spend in sorted(per_branch_copy.items()):
             lines.append(
                 f"  {branch_id}: ${spend.cost_usd:.4f} "
                 f"({spend.input_tokens:,} in, {spend.output_tokens:,} out)"

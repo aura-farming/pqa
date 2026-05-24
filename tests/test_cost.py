@@ -158,3 +158,40 @@ def test_spend_default_is_zero():
 
 def test_known_models_priced():
     assert {"claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5"} <= MODEL_PRICING.keys()
+
+
+# ---------------------------------------------------------------------------
+# TOCTOU consistency — every observable comes from a single lock acquisition
+# (audit findings #1 and #2)
+
+
+def test_report_status_matches_displayed_spend():
+    """report()'s status line must agree with the spent/remaining values displayed in
+    the same report. Previously these were separate lock acquisitions, so the report
+    could show status=ok while the snapshot already reflected abort."""
+    g = CostGovernor(Budget(max_usd=1.0))
+    g.record("b", "claude-sonnet-4-6", 400_000, 0)  # $1.20 → past cap
+    report = g.report()
+    assert "status: abort" in report
+    # And the spent line shows a number actually past the cap.
+    assert "$1.2000 of $1.00" in report or "$1.20" in report
+
+
+def test_should_abort_is_single_lock_acquisition():
+    """Smoke: should_abort should not deadlock or split-read under contention."""
+    g = CostGovernor(Budget(max_usd=10_000.0))
+    aborts: list[bool] = []
+
+    def hammer():
+        for _ in range(500):
+            g.record("b", "claude-sonnet-4-6", 10, 10)
+            aborts.append(g.should_abort())
+
+    threads = [threading.Thread(target=hammer) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    # No deadlock; final state is stable.
+    assert g.total().input_tokens == 4 * 500 * 10
+    assert not g.should_abort()  # well under budget
