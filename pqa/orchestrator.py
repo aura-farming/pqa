@@ -51,6 +51,41 @@ GeneratorFn = Callable[[Branch], tuple[Branch, int, int]]  # -> populated branch
 AdversaryFn = Callable[[list[Branch]], tuple[list[Finding], int, int]]
 VerifierFn = Callable[[Branch], VerifyResult]
 
+# Human-in-the-loop checkpoint callbacks (Gap #9). Each callback inspects the run state at
+# a defined gate and returns either None (proceed) or an abort-reason string (stop the run
+# now with that reason). The framework's founding example was a human collision the harness
+# could not have produced on its own — these gates give the operator a defined place to
+# inject that perturbation.
+FrameCheckpointFn = Callable[
+    [Frame, Frame, "object"],  # research, selfeval, disagreement (or None)
+    "str | None",
+]
+PreCollapseCheckpointFn = Callable[
+    [list[Branch], list[Finding], list[BranchResult]],
+    "str | None",
+]
+
+
+@dataclass(frozen=True)
+class HumanCheckpoints:
+    """Optional callbacks invoked at the two highest-leverage operator-injection points.
+
+    on_frame fires AFTER detect_disagreement and BEFORE generation. The operator sees the
+    research view, the self-eval view, and the detected disagreement (or None). They can
+    abort the run if the disagreement is wrong or missing a perturbation only a human can
+    see — saving the entire generation spend.
+
+    on_pre_collapse fires AFTER the branch_results are built and BEFORE select_survivor.
+    The operator sees every branch's output, findings, and verification result. They can
+    abort if the apparent survivor breaks a contract the verifier does not catch.
+
+    A None return value means "proceed"; any string return value aborts the run with that
+    string as the abort reason.
+    """
+
+    on_frame: FrameCheckpointFn | None = None
+    on_pre_collapse: PreCollapseCheckpointFn | None = None
+
 
 @dataclass(frozen=True)
 class RunReport:
@@ -155,6 +190,7 @@ def run(
     n_branches: int = 2,
     baseline: Baseline | None = None,
     force_non_obvious: int | None = None,
+    checkpoints: HumanCheckpoints | None = None,
 ) -> RunReport:
     """One PQA run, end-to-end.
 
@@ -167,6 +203,25 @@ def run(
 
     # ---- 1. Frame collision ------------------------------------------------
     disagreement = detect_disagreement(research, selfeval)
+
+    # Human-in-the-loop perturbation point: the operator can abort here if the
+    # disagreement is wrong or missing an axis only a human can see.
+    if checkpoints is not None and checkpoints.on_frame is not None:
+        frame_abort = checkpoints.on_frame(research, selfeval, disagreement)
+        if frame_abort:
+            # Record the frame anyway so the failure taxonomy captures the rejected gate.
+            record_frame(conn, session_id, task, research, selfeval, disagreement)
+            return _aborted_report(
+                task,
+                session_id,
+                f"human checkpoint aborted at frame gate: {frame_abort}",
+                [],
+                [],
+                None,
+                governor,
+                started_at,
+            )
+
     frame_id = record_frame(conn, session_id, task, research, selfeval, disagreement)
 
     # ---- 2. Spawn + generate ----------------------------------------------
@@ -235,6 +290,22 @@ def run(
                 incremental=b.incremental,
             )
         )
+
+    # Pre-collapse human checkpoint: the operator can abort here if the apparent
+    # survivor breaks a contract the verifier cannot catch.
+    if checkpoints is not None and checkpoints.on_pre_collapse is not None:
+        pre_abort = checkpoints.on_pre_collapse(branches, findings, branch_results)
+        if pre_abort:
+            return _aborted_report(
+                task,
+                session_id,
+                f"human checkpoint aborted at pre-collapse gate: {pre_abort}",
+                branches,
+                branch_results,
+                divergence,
+                governor,
+                started_at,
+            )
 
     # ---- 7. Collapse -------------------------------------------------------
     outcome = select_survivor(branch_results)
