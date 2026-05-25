@@ -5,23 +5,40 @@ satisfy. They were committed to the branches' base ref before the orchestrator
 spawned generators — branches that author or modify these tests are flagged
 as critical anomalies and excluded from collapse.
 
-Behaviour pinned here:
-    1. `from pqa.config import load_config` is the canonical entry point.
-    2. load_config(path) returns an object exposing the five PQA settings
-       (branches, verify_tests, model, run_budget_usd, memory_db) with the
-       types config/settings.py declares.
-    3. The returned object is immutable (frozen) — mutating an attribute raises.
-    4. A malformed TOML raises an exception that chains tomllib.TOMLDecodeError;
-       silent acceptance of broken TOML is forbidden.
-    5. The loader accepts both str and pathlib.Path for the file argument.
+This is the TIGHTENED contract written after the first PQA round produced
+no survivor on this task: three valid topologies all silently corrupted data
+on wrong-typed values, unknown keys, and ambient env vars. The precipitate
+named the cure — pin the axes where data integrity hinges, leave the rest open.
 
-Behaviour deliberately NOT pinned (branches differ on these — the adversary
+Behaviour pinned (the contract — branches CANNOT differ on these):
+    1. `from pqa.config import load_config` is the canonical entry point.
+    2. load_config(path) returns an immutable typed object exposing the five
+       PQA settings (branches: int, verify_tests: bool, model: str,
+       run_budget_usd: float, memory_db: str). Mutating an attribute raises.
+    3. The loader accepts both str and pathlib.Path.
+    4. A malformed TOML raises an exception that chains tomllib.TOMLDecodeError.
+    5. A wrong-typed TOML value (e.g. branches = "seven", verify_tests = "true"
+       as a string) raises — silent default substitution is forbidden because
+       that is the data-corruption class the first round died on.
+    6. A missing file raises FileNotFoundError (or wraps it via __cause__).
+       Defaulting silently when the user named a path is data loss.
+    7. An unknown key in the [pqa] table raises — silent ignore is the same
+       data-corruption class as wrong-typed values (user typo → silent miss).
+    8. Precedence is env > TOML > built-in defaults. PQA_* env vars override
+       TOML; missing TOML keys fall through to defaults from config/settings.py.
+    9. A malformed PQA_* env var (e.g. PQA_BRANCHES='three') raises a clear
+       error — not a bare unchained ValueError at consumer attribute access.
+   10. A partial TOML (some [pqa] keys present, others missing) uses defaults
+       from config/settings.py for the missing keys — partial != error.
+
+Behaviour deliberately NOT pinned (branches still differ here — the adversary
 attacks the differences):
-    - Whether env vars participate, and if so what precedence they take vs TOML.
-    - Whether the loader returns defaults or raises when the file is absent.
-    - Whether unknown TOML keys raise, warn, or are silently ignored.
-    - The exact internal module path of the loader — only `pqa.config.load_config`
-      is locked as a public symbol.
+    - The exact internal module path under pqa/ — only the public symbol is locked.
+    - The error type hierarchy (ConfigError class vs builtin TypeError/ValueError
+      with chained __cause__) — branches choose error shape.
+    - Eager vs lazy resolution under the hood (as long as observable behaviour
+      matches the pins above).
+    - Whether the loader is a class, function, or other callable shape.
 """
 
 from __future__ import annotations
@@ -107,3 +124,143 @@ def test_load_config_accepts_str_or_path(tmp_path: Path) -> None:
     from_path = load_config(toml)
     from_str = load_config(str(toml))
     assert from_path.branches == from_str.branches == 5
+
+
+# ---------------------------------------------------------------------------
+# Tightened contract (spiral round) — pins the axes the first round died on.
+
+
+def _write_raw_toml(path: Path, body: str) -> Path:
+    """Write an arbitrary TOML body (used when overriding types or schema)."""
+    path.write_text(body)
+    return path
+
+
+def test_load_config_rejects_wrong_typed_branches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """branches='seven' (string) must raise — silent default is data corruption."""
+    monkeypatch.delenv("PQA_BRANCHES", raising=False)
+    toml = _write_raw_toml(
+        tmp_path / "pqa-config.toml", '[pqa]\nbranches = "seven"\nmodel = "opus"\n'
+    )
+    # B017 disabled: the locked contract intentionally leaves error-type unpinned —
+    # branches may raise TypeError, ValueError, a custom ConfigError, or anything else;
+    # only the fact that load_config raises is locked.
+    with pytest.raises(Exception):  # noqa: B017
+        load_config(toml)
+
+
+def test_load_config_rejects_wrong_typed_verify_tests(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """verify_tests = "true" (string, not bool) must raise — user typo must surface."""
+    monkeypatch.delenv("PQA_VERIFY_TESTS", raising=False)
+    toml = _write_raw_toml(
+        tmp_path / "pqa-config.toml", '[pqa]\nverify_tests = "true"\nmodel = "opus"\n'
+    )
+    # B017 disabled: the locked contract intentionally leaves error-type unpinned —
+    # branches may raise TypeError, ValueError, a custom ConfigError, or anything else;
+    # only the fact that load_config raises is locked.
+    with pytest.raises(Exception):  # noqa: B017
+        load_config(toml)
+
+
+def test_load_config_missing_file_raises(tmp_path: Path) -> None:
+    """Missing file → FileNotFoundError (raw or chained). Silent default is data loss."""
+    missing = tmp_path / "does-not-exist.toml"
+    with pytest.raises(Exception) as exc_info:
+        load_config(missing)
+    chain: list[BaseException] = []
+    current: BaseException | None = exc_info.value
+    while current is not None:
+        chain.append(current)
+        current = current.__cause__ or current.__context__
+    assert any(isinstance(exc, FileNotFoundError) for exc in chain), (
+        "missing-file must chain FileNotFoundError; raised "
+        f"{type(exc_info.value).__name__} without it"
+    )
+
+
+def test_load_config_env_overrides_toml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """env > TOML. PQA_BRANCHES=42 with TOML branches=7 → cfg.branches == 42."""
+    monkeypatch.setenv("PQA_BRANCHES", "42")
+    monkeypatch.setenv("PQA_MODEL", "haiku-from-env")
+    toml = _write_toml(tmp_path / "pqa-config.toml", branches=7, model="opus-from-toml")
+    cfg = load_config(toml)
+    assert cfg.branches == 42
+    assert cfg.model == "haiku-from-env"
+
+
+def test_load_config_rejects_unknown_pqa_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Unknown keys in [pqa] raise — silent ignore is the same data-corruption class."""
+    for var in (
+        "PQA_BRANCHES",
+        "PQA_VERIFY_TESTS",
+        "PQA_MODEL",
+        "PQA_RUN_BUDGET_USD",
+        "PQA_MEMORY_DB",
+    ):
+        monkeypatch.delenv(var, raising=False)
+    toml = _write_raw_toml(
+        tmp_path / "pqa-config.toml",
+        '[pqa]\nbranches = 3\nverify_tests = false\nmodel = "opus"\n'
+        'run_budget_usd = 15.0\nmemory_db = ".db"\nverifie_tests = true\n',  # typo
+    )
+    # B017 disabled: the locked contract intentionally leaves error-type unpinned —
+    # branches may raise TypeError, ValueError, a custom ConfigError, or anything else;
+    # only the fact that load_config raises is locked.
+    with pytest.raises(Exception):  # noqa: B017
+        load_config(toml)
+
+
+def test_load_config_partial_toml_uses_defaults_for_missing_keys(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TOML with only `model` set → other fields are defaults from config/settings.py.
+    Partial config is not an error; only unknown keys are. Defaults from settings.py:
+    branches=3, verify_tests=False, model='opus', run_budget_usd=15.0,
+    memory_db='.claude/hooks/memory/pqa_memory.db'.
+    """
+    for var in (
+        "PQA_BRANCHES",
+        "PQA_VERIFY_TESTS",
+        "PQA_MODEL",
+        "PQA_RUN_BUDGET_USD",
+        "PQA_MEMORY_DB",
+    ):
+        monkeypatch.delenv(var, raising=False)
+    toml = _write_raw_toml(tmp_path / "pqa-config.toml", '[pqa]\nmodel = "haiku"\n')
+    cfg = load_config(toml)
+    assert cfg.model == "haiku"
+    assert cfg.branches == 3
+    assert cfg.verify_tests is False
+    assert cfg.run_budget_usd == pytest.approx(15.0)
+    assert cfg.memory_db == ".claude/hooks/memory/pqa_memory.db"
+
+
+def test_load_config_invalid_env_value_raises_clearly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PQA_BRANCHES='three' (env value not parseable as int) → raises at load_config time,
+    not later at consumer attribute access. The error must mention the env var name OR
+    chain a ValueError so the user can find the cause."""
+    monkeypatch.setenv("PQA_BRANCHES", "three")
+    toml = _write_toml(tmp_path / "pqa-config.toml")
+    with pytest.raises(Exception) as exc_info:
+        load_config(toml)
+    text = (
+        f"{exc_info.value}".lower()
+        + " "
+        + " ".join(
+            str(e).lower() for e in (exc_info.value.__cause__, exc_info.value.__context__) if e
+        )
+    )
+    assert (
+        "pqa_branches" in text
+        or "branches" in text
+        or "valueerror" in text
+        or "value error" in text
+    ), f"invalid-env error must name the failing var or chain ValueError; got: {exc_info.value!r}"
