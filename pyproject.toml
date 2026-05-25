@@ -46,6 +46,15 @@ ignore = []
 ]
 "hooks/security_gate.py" = ["E501"]         # DANGEROUS regex table reads better one entry per line
 
+[tool.ruff.lint.isort]
+# Declare first-party packages explicitly. Without this, ruff classifies them
+# by *disk presence* — so `from pqa.config import ...` is third-party until
+# `pqa/config/` exists, then becomes first-party. That shifts where I001
+# requires blank-line separators across worktrees and produces phantom
+# lint failures on locked test files. Locking the classification keeps
+# `ruff format` and `ruff check` in agreement.
+known-first-party = ["pqa", "config", "hooks", "scripts"]
+
 [tool.ruff.format]
 quote-style = "double"
 docstring-code-format = true

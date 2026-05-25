@@ -30,6 +30,7 @@ import tomllib
 from pathlib import Path
 
 import pytest
+
 from pqa.config import load_config
 
 
