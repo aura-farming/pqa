@@ -241,6 +241,90 @@ def test_load_config_partial_toml_uses_defaults_for_missing_keys(
     assert cfg.memory_db == ".claude/hooks/memory/pqa_memory.db"
 
 
+def test_load_config_rejects_non_finite_run_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Inf/nan smuggle past `float()` parsing and would bypass cost-tracker budgets.
+    Both PQA_RUN_BUDGET_USD=inf and PQA_RUN_BUDGET_USD=nan must raise at load time."""
+    for var in ("PQA_BRANCHES", "PQA_VERIFY_TESTS", "PQA_MODEL", "PQA_MEMORY_DB"):
+        monkeypatch.delenv(var, raising=False)
+    toml = _write_toml(tmp_path / "pqa-config.toml")
+    for bad in ("inf", "-inf", "nan", "Infinity"):
+        monkeypatch.setenv("PQA_RUN_BUDGET_USD", bad)
+        with pytest.raises(Exception):  # noqa: B017
+            load_config(toml)
+
+
+def test_load_config_rejects_non_positive_branches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """branches must be >= 1 — 0 and negatives are not a valid superposition.
+    Domain validation closes the gap between Python-type-correct and
+    semantically-correct: branches=0 passes isinstance(int) but cannot run."""
+    for var in (
+        "PQA_BRANCHES",
+        "PQA_VERIFY_TESTS",
+        "PQA_MODEL",
+        "PQA_RUN_BUDGET_USD",
+        "PQA_MEMORY_DB",
+    ):
+        monkeypatch.delenv(var, raising=False)
+    for bad in (0, -1, -100):
+        toml = _write_toml(tmp_path / "pqa-config.toml", branches=bad)
+        with pytest.raises(Exception):  # noqa: B017
+            load_config(toml)
+
+
+def test_load_config_rejects_negative_run_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """run_budget_usd must be > 0 — Budget dataclass enforces it; load_config
+    should fail fast at the boundary, not let invalid values flow downstream."""
+    for var in (
+        "PQA_BRANCHES",
+        "PQA_VERIFY_TESTS",
+        "PQA_MODEL",
+        "PQA_RUN_BUDGET_USD",
+        "PQA_MEMORY_DB",
+    ):
+        monkeypatch.delenv(var, raising=False)
+    for bad in (0.0, -0.01, -100.0):
+        toml = _write_toml(tmp_path / "pqa-config.toml", run_budget_usd=bad)
+        with pytest.raises(Exception):  # noqa: B017
+            load_config(toml)
+
+
+def test_load_config_translates_non_utf8_to_tomldecodeerror(tmp_path: Path) -> None:
+    """Non-UTF8 bytes must chain TOMLDecodeError, same as syntactically-malformed
+    TOML. Leaking a raw UnicodeDecodeError bypasses the round-1 contract pin."""
+    toml = tmp_path / "pqa-config.toml"
+    # Latin-1 encoded bytes that are not valid UTF-8 (0xC3 followed by 0x28 is invalid).
+    toml.write_bytes(b'[pqa]\nmodel = "\xc3\x28"\n')
+    with pytest.raises(Exception) as exc_info:
+        load_config(toml)
+    chain: list[BaseException] = []
+    current: BaseException | None = exc_info.value
+    while current is not None:
+        chain.append(current)
+        current = current.__cause__ or current.__context__
+    assert any(isinstance(exc, tomllib.TOMLDecodeError) for exc in chain), (
+        f"non-UTF8 TOML must chain TOMLDecodeError; got {[type(e).__name__ for e in chain]}"
+    )
+
+
+def test_load_config_directory_path_raises_clearly(tmp_path: Path) -> None:
+    """Passing a directory path must raise a clear error, not leak raw
+    IsADirectoryError. The contract for `not a usable file` is broader than
+    `missing file` — a path-shape error must surface explicitly."""
+    with pytest.raises(Exception) as exc_info:
+        load_config(tmp_path)  # tmp_path is a directory, not a file
+    # The error must mention the path or its directory-ness so callers can debug.
+    text = str(exc_info.value).lower()
+    assert "director" in text or "not a regular file" in text or "is a directory" in text, (
+        f"directory-path error must surface the cause; got: {exc_info.value!r}"
+    )
+
+
 def test_load_config_invalid_env_value_raises_clearly(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

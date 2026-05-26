@@ -19,6 +19,7 @@ Topology:
 
 from __future__ import annotations
 
+import math
 import os
 import tomllib
 from dataclasses import dataclass
@@ -72,6 +73,10 @@ def _validate_branches(value: object, *, origin: str) -> int:
         raise TypeError(
             f"{origin}: 'branches' must be int, got {type(value).__name__}={value!r}",
         )
+    if value < 1:
+        raise ValueError(
+            f"{origin}: 'branches' must be >= 1, got {value}",
+        )
     return value
 
 
@@ -97,7 +102,17 @@ def _validate_run_budget_usd(value: object, *, origin: str) -> float:
             f"{origin}: 'run_budget_usd' must be float, got bool={value!r}",
         )
     if isinstance(value, int | float):
-        return float(value)
+        as_float = float(value)
+        if not math.isfinite(as_float):
+            raise ValueError(
+                f"{origin}: 'run_budget_usd' must be finite, got {as_float!r} "
+                "(inf/nan would bypass the cost-tracker budget gate)",
+            )
+        if as_float <= 0:
+            raise ValueError(
+                f"{origin}: 'run_budget_usd' must be > 0, got {as_float!r}",
+            )
+        return as_float
     raise TypeError(
         f"{origin}: 'run_budget_usd' must be float, got {type(value).__name__}={value!r}",
     )
@@ -162,15 +177,39 @@ def _coerce_env_value(key: str, raw: str) -> int | bool | str | float:
 
 
 def _read_toml(path: Path) -> dict[str, object]:
-    """Read and parse the TOML file. Chain TOMLDecodeError and FileNotFoundError."""
+    """Read and parse the TOML file. Chain TOMLDecodeError and FileNotFoundError.
+
+    Path-shape errors surface explicitly:
+        - Missing path                 -> FileNotFoundError
+        - Path exists but is not a file -> IsADirectoryError
+        - Path exists but unreadable    -> chained FileNotFoundError
+
+    Encoding errors translate to TOMLDecodeError so the locked-contract pin
+    (malformed-file chains TOMLDecodeError) holds for non-UTF8 inputs too.
+    """
+    if not path.exists():
+        raise FileNotFoundError(f"PQA config file not found: {path}")
+    if not path.is_file():
+        raise IsADirectoryError(
+            f"PQA config path is not a regular file (got a directory): {path}",
+        )
     try:
         raw = path.read_bytes()
-    except FileNotFoundError as cause:
+    except OSError as cause:
         raise FileNotFoundError(
-            f"PQA config file not found: {path}",
+            f"PQA config file unreadable: {path}",
         ) from cause
     try:
-        parsed = tomllib.loads(raw.decode("utf-8"))
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as cause:
+        # Python 3.14 requires the keyword form for TOMLDecodeError.
+        raise tomllib.TOMLDecodeError(
+            msg=f"PQA config file is not valid UTF-8: {path}",
+            doc="",
+            pos=cause.start,
+        ) from cause
+    try:
+        parsed = tomllib.loads(text)
     except tomllib.TOMLDecodeError as cause:
         raise ValueError(
             f"PQA config file is not valid TOML: {path}",
