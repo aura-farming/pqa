@@ -118,11 +118,43 @@ def _validate_run_budget_usd(value: object, *, origin: str) -> float:
     )
 
 
+_DANGEROUS_PATH_PREFIXES: Final[tuple[str, ...]] = (
+    "/etc/",
+    "/usr/",
+    "/var/",
+    "/sys/",
+    "/proc/",
+    "/dev/",
+    "/boot/",
+    "/root/",
+    "/bin/",
+    "/sbin/",
+    "/lib/",
+    "/lib64/",
+    "/System/",
+)
+
+
 def _validate_memory_db(value: object, *, origin: str) -> str:
     if not isinstance(value, str):
         raise TypeError(
             f"{origin}: 'memory_db' must be str, got {type(value).__name__}={value!r}",
         )
+    if not value.strip():
+        raise ValueError(
+            f"{origin}: 'memory_db' must be a non-empty path",
+        )
+    # POSIX-only sanity guard: refuse to create / overwrite sqlite files in system
+    # directories. Catches accidental fat-finger / stale env from another project,
+    # not adversarial use (the trust model is a developer's own machine). Windows
+    # paths don't match these prefixes so the check is a no-op there.
+    absolute = str(Path(value).expanduser().absolute())
+    for prefix in _DANGEROUS_PATH_PREFIXES:
+        if absolute.startswith(prefix):
+            raise ValueError(
+                f"{origin}: 'memory_db' resolves into a system directory ({absolute}); "
+                "use a path under your project or home directory",
+            )
     return value
 
 

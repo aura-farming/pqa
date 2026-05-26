@@ -312,6 +312,46 @@ def test_load_config_translates_non_utf8_to_tomldecodeerror(tmp_path: Path) -> N
     )
 
 
+def test_load_config_rejects_memory_db_in_system_dirs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """memory_db ends up at sqlite3.connect — accidental writes into /etc, /usr,
+    /var, /sys, /dev etc. would create files in system locations. Reject those
+    paths upfront so a fat-finger or stale env from another project can't write
+    a sqlite file into a system directory."""
+    for var in (
+        "PQA_BRANCHES",
+        "PQA_VERIFY_TESTS",
+        "PQA_MODEL",
+        "PQA_RUN_BUDGET_USD",
+        "PQA_MEMORY_DB",
+    ):
+        monkeypatch.delenv(var, raising=False)
+    for bad in ("/etc/pqa.db", "/usr/share/pqa.db", "/var/lib/pqa.db", "/dev/null"):
+        toml = _write_toml(tmp_path / "pqa-config.toml", memory_db=bad)
+        with pytest.raises(Exception) as exc_info:
+            load_config(toml)
+        assert "memory_db" in str(exc_info.value) or "system" in str(exc_info.value).lower()
+
+
+def test_load_config_rejects_empty_memory_db(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Empty string is never a valid sqlite path; surface the typo at load time."""
+    for var in (
+        "PQA_BRANCHES",
+        "PQA_VERIFY_TESTS",
+        "PQA_MODEL",
+        "PQA_RUN_BUDGET_USD",
+        "PQA_MEMORY_DB",
+    ):
+        monkeypatch.delenv(var, raising=False)
+    for bad in ("", "   ", "\t"):
+        toml = _write_toml(tmp_path / "pqa-config.toml", memory_db=bad)
+        with pytest.raises(Exception):  # noqa: B017
+            load_config(toml)
+
+
 def test_load_config_directory_path_raises_clearly(tmp_path: Path) -> None:
     """Passing a directory path must raise a clear error, not leak raw
     IsADirectoryError. The contract for `not a usable file` is broader than
