@@ -48,7 +48,7 @@ from pathlib import Path
 
 import pytest
 
-from pqa.config import load_config
+from pqa.config import load_config, load_or_defaults
 
 
 def _write_toml(path: Path, **overrides: object) -> Path:
@@ -388,3 +388,77 @@ def test_load_config_invalid_env_value_raises_clearly(
         or "valueerror" in text
         or "value error" in text
     ), f"invalid-env error must name the failing var or chain ValueError; got: {exc_info.value!r}"
+
+
+# ---------------------------------------------------------------------------
+# load_or_defaults — graceful fallback when no TOML file is present.
+
+
+def test_load_or_defaults_with_missing_file_returns_defaults(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No TOML present → defaults from _DEFAULTS, env still applied if set."""
+    for var in (
+        "PQA_BRANCHES",
+        "PQA_VERIFY_TESTS",
+        "PQA_MODEL",
+        "PQA_RUN_BUDGET_USD",
+        "PQA_MEMORY_DB",
+    ):
+        monkeypatch.delenv(var, raising=False)
+    cfg = load_or_defaults(tmp_path / "no-such-file.toml")
+    assert cfg.branches == 3
+    assert cfg.verify_tests is False
+    assert cfg.model == "opus"
+    assert cfg.run_budget_usd == pytest.approx(15.0)
+    assert cfg.memory_db == ".claude/hooks/memory/pqa_memory.db"
+
+
+def test_load_or_defaults_with_present_file_calls_load_config(tmp_path: Path) -> None:
+    """File present → identical behaviour to load_config(path)."""
+    toml = _write_toml(tmp_path / "pqa-config.toml", branches=11, model="haiku")
+    cfg = load_or_defaults(toml)
+    assert cfg.branches == 11
+    assert cfg.model == "haiku"
+
+
+def test_load_or_defaults_env_overrides_apply_even_with_no_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No file, but env is set → env wins over defaults."""
+    monkeypatch.setenv("PQA_BRANCHES", "9")
+    monkeypatch.setenv("PQA_MODEL", "haiku")
+    cfg = load_or_defaults(tmp_path / "no-such-file.toml")
+    assert cfg.branches == 9
+    assert cfg.model == "haiku"
+
+
+def test_load_or_defaults_default_path_is_pqa_config_toml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No argument → looks for pqa-config.toml in CWD. chdir into empty tmp_path
+    so the file is guaranteed absent."""
+    monkeypatch.chdir(tmp_path)
+    for var in (
+        "PQA_BRANCHES",
+        "PQA_VERIFY_TESTS",
+        "PQA_MODEL",
+        "PQA_RUN_BUDGET_USD",
+        "PQA_MEMORY_DB",
+    ):
+        monkeypatch.delenv(var, raising=False)
+    cfg = load_or_defaults()
+    assert cfg.branches == 3
+
+
+def test_load_or_defaults_propagates_validation_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """File present but malformed → load_or_defaults must NOT swallow the error."""
+    monkeypatch.delenv("PQA_BRANCHES", raising=False)
+    toml = _write_raw_toml(
+        tmp_path / "pqa-config.toml",
+        '[pqa]\nbranches = "seven"\n',
+    )
+    with pytest.raises(Exception):  # noqa: B017
+        load_or_defaults(toml)

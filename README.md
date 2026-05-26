@@ -40,6 +40,30 @@ Then open Claude Code in your project and run `/pqa <task>`.
 
 Learning is portable: `/instinct-status` shows what PQA has learned (with confidence), `/instinct-export` / `/instinct-import` share instincts across people, `/evolve` clusters them into skills, and `/dashboard` renders the accumulating moat.
 
+## Configuration
+
+PQA reads runtime settings from `pqa-config.toml` (TOML) and / or `PQA_*`
+environment variables. Precedence is **env > TOML > built-in defaults**.
+
+```python
+from pqa.config import load_or_defaults
+cfg = load_or_defaults()          # reads ./pqa-config.toml if present
+cfg = load_or_defaults("custom.toml")  # explicit path; falls back to defaults if missing
+```
+
+For a strict-required-file entry point, use `load_config(path)` — it raises
+`FileNotFoundError` when the file is absent. See `pqa-config.example.toml`
+for the full schema with comments. The loader is stdlib-only (`tomllib`),
+strictly typed, and rejects:
+
+- wrong-typed values (`branches = "seven"`)
+- unknown keys in `[pqa]`
+- non-finite or non-positive `run_budget_usd` (closes a cost-tracker bypass)
+- `memory_db` paths into system directories (`/etc`, `/var`, etc.)
+
+See `tests/test_config.py` for the locked behavioural contract (24 tests
+covering type discipline, precedence, error chaining, and security guards).
+
 ## How it's built
 
 Python 3.14.5 (stdlib-only harness core) · uv + pyproject.toml · Claude Code plugin (agents/skills/commands/hooks + `.claude-plugin/` manifests) · git worktrees for parallel branches · SQLite (WAL) for memory · ruff 0.15 / pyright 1.1.409 strict / pytest 9 + mutmut as the collapse gate. Three CI workflows gate every change; Dependabot keeps the toolchain at latest. Every agent: `model: opus`.

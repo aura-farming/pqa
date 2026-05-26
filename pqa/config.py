@@ -339,4 +339,46 @@ def _env_name_for(key: str) -> str:
     return f"PQA_{key.upper()}"
 
 
-__all__ = ["PQAConfig", "load_config"]
+def _build_defaults_with_env() -> PQAConfig:
+    """Construct a PQAConfig from defaults + PQA_* env overrides, no TOML.
+
+    Used by load_or_defaults() when no TOML file is present. Goes through the
+    same per-field validators as the TOML path so the same domain rules apply.
+    """
+    resolved: dict[str, int | bool | str | float] = dict(_DEFAULTS)
+    for key, value in _collect_env_overrides().items():
+        resolved[key] = _validate_field(key, value, origin=f"env:{_env_name_for(key)}")
+    return PQAConfig(
+        branches=int(resolved["branches"]),
+        verify_tests=bool(resolved["verify_tests"]),
+        model=str(resolved["model"]),
+        run_budget_usd=float(resolved["run_budget_usd"]),
+        memory_db=str(resolved["memory_db"]),
+    )
+
+
+_DEFAULT_CONFIG_PATH: Final[str] = "pqa-config.toml"
+
+
+def load_or_defaults(path: str | Path | None = None) -> PQAConfig:
+    """Load PQA configuration with graceful fallback to defaults + env.
+
+    Behaviour:
+        - If ``path`` is ``None``, defaults to ``pqa-config.toml`` in CWD.
+        - If the file exists, calls :func:`load_config` (full strict validation).
+        - If the file does NOT exist, returns a :class:`PQAConfig` built from
+          built-in defaults + ``PQA_*`` env overrides only. No TOML required.
+
+    All other error semantics match :func:`load_config` — malformed TOML, wrong
+    types, unknown keys, invalid env values still raise.
+
+    Use this in entry points (``main.py``, CLI shims) where users may or may not
+    have a TOML file. Use :func:`load_config` directly when a file is required.
+    """
+    resolved_path = Path(path) if path is not None else Path(_DEFAULT_CONFIG_PATH)
+    if resolved_path.exists():
+        return load_config(resolved_path)
+    return _build_defaults_with_env()
+
+
+__all__ = ["PQAConfig", "load_config", "load_or_defaults"]
