@@ -225,7 +225,44 @@ Write the cost_runs row, emit the artefact path, return.
 
 ## Cost discipline throughout
 
-After every Task call, the orchestrator records spend by reading the sub-Claude's token usage and calling `CostGovernor.record(branch_id, model, in, out)`. Before every Task call, check `governor.should_abort()`. If True, emit an aborted RunReport with the partial state and stop. Budget caps are absolute; conviction does not override them.
+Cost gating runs in two places. **Before** every Task dispatch, call the pre-flight projection gate; **after**, record the actual spend. `should_abort()` alone is not enough — by the time it returns True, the offending dispatch has already happened and its spend has been recorded after-the-fact (issue #32).
+
+### Pre-flight (before each Task)
+
+Call `governor.would_abort(model, projected_in, projected_out)` with conservative token projections. Conservative means: pessimistic but bounded. If `would_abort` returns True, do not dispatch — emit an aborted RunReport with the partial state and stop.
+
+Use these projections (they are deliberately pessimistic — they err on the side of refusing a dispatch that might fit, not on letting one through that won't):
+
+| Model | Input projection | Output projection |
+|---|---|---|
+| `claude-opus-4-7` | `max(len(prompt) // 3, 50_000)` | `16_000` |
+| `claude-sonnet-4-6` | `max(len(prompt) // 3, 20_000)` | `8_000` |
+| `claude-haiku-4-5` | `max(len(prompt) // 3, 10_000)` | `4_000` |
+
+`len(prompt) // 3` is a conservative char→token bound (English averages ~4 chars/token, but prompts containing code, JSON, or non-ASCII run closer to 3). The floor (`50_000` etc.) covers tool-definition overhead and prior conversation context that the orchestrator can't measure directly.
+
+Example pre-flight check:
+
+```bash
+python <<'PY'
+from pqa.cost import CostGovernor
+gov = CostGovernor(...)  # restored from session state
+prompt = open(".pqa/spawn_prompts.json").read()
+projected_in = max(len(prompt) // 3, 50_000)
+projected_out = 16_000  # opus subagent default
+if gov.would_abort("claude-opus-4-7", projected_in, projected_out):
+    print("ABORT: dispatch would exceed budget cap")
+    # write aborted RunReport, exit
+PY
+```
+
+### Post-call (after each Task)
+
+After every Task returns, record actual spend with `CostGovernor.record(branch_id, model, in, out)`. The recorded values come from the sub-Claude's reported token usage; do not estimate after the fact when the true count is available.
+
+Then also call `governor.should_abort()` as a belt-and-braces check — if the actual spend exceeded the projection, the run aborts here before the next dispatch.
+
+Budget caps are absolute. Conviction does not override them. A run that hits its cap mid-loop emits whatever artefacts exist and stops; the partial state is recorded as a failed run, not a successful one.
 
 ## Honesty rules
 

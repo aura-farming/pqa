@@ -116,6 +116,27 @@ class CostGovernor:
         _total, _per_branch, status = self._snapshot_under_lock()
         return status == "abort"
 
+    def would_abort(
+        self,
+        model: str,
+        projected_input_tokens: int,
+        projected_output_tokens: int,
+    ) -> bool:
+        """Pre-flight gate: True if recording the projected dispatch would push total
+        spend past the cap. Use BEFORE dispatching expensive operations whose spend is
+        only recorded after the call returns (e.g. Task tool dispatches). Pure projection
+        — does not mutate state. Single lock acquisition, no TOCTOU between projection
+        and gate decision. Closes issue #32: should_abort() can only catch overspend
+        after the fact; would_abort() catches it before."""
+        if projected_input_tokens < 0 or projected_output_tokens < 0:
+            raise ValueError(
+                "projected token counts must be non-negative, "
+                f"got input={projected_input_tokens} output={projected_output_tokens}"
+            )
+        projected_cost = cost_for(model, projected_input_tokens, projected_output_tokens)
+        total, _per_branch, _status = self._snapshot_under_lock()
+        return self._status_from(total.cost_usd + projected_cost) == "abort"
+
     def remaining_usd(self) -> float:
         total, _per_branch, _status = self._snapshot_under_lock()
         return max(0.0, self._budget.max_usd - total.cost_usd)
