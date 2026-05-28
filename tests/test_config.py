@@ -50,6 +50,14 @@ import pytest
 
 from pqa.config import load_config, load_or_defaults
 
+_ALL_PQA_ENV_VARS: tuple[str, ...] = (
+    "PQA_BRANCHES",
+    "PQA_VERIFY_TESTS",
+    "PQA_MODEL",
+    "PQA_RUN_BUDGET_USD",
+    "PQA_MEMORY_DB",
+)
+
 
 def _write_toml(path: Path, **overrides: object) -> Path:
     """Write a minimal pqa-config.toml with [pqa] section under the given path."""
@@ -185,11 +193,11 @@ def test_load_config_missing_file_raises(tmp_path: Path) -> None:
 def test_load_config_env_overrides_toml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """env > TOML. PQA_BRANCHES=42 with TOML branches=7 → cfg.branches == 42."""
     monkeypatch.setenv("PQA_BRANCHES", "42")
-    monkeypatch.setenv("PQA_MODEL", "haiku-from-env")
-    toml = _write_toml(tmp_path / "pqa-config.toml", branches=7, model="opus-from-toml")
+    monkeypatch.setenv("PQA_MODEL", "haiku")
+    toml = _write_toml(tmp_path / "pqa-config.toml", branches=7, model="sonnet")
     cfg = load_config(toml)
     assert cfg.branches == 42
-    assert cfg.model == "haiku-from-env"
+    assert cfg.model == "haiku"
 
 
 def test_load_config_rejects_unknown_pqa_key(
@@ -462,3 +470,67 @@ def test_load_or_defaults_propagates_validation_errors(
     )
     with pytest.raises(Exception):  # noqa: B017
         load_or_defaults(toml)
+
+
+# ---------------------------------------------------------------------------
+# Model allowlist — the `model` field is restricted to {opus, sonnet, haiku}.
+# An unknown short alias would silently break cost accounting at dispatch time
+# (MODEL_PRICING translates "opus" → "claude-opus-4-7", etc.) so we fail closed
+# at config load instead of waiting for a KeyError mid-run.
+
+
+@pytest.mark.parametrize("model", ["opus", "sonnet", "haiku"])
+def test_load_config_accepts_each_allowlisted_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, model: str
+) -> None:
+    for var in _ALL_PQA_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
+    toml = _write_toml(tmp_path / "pqa-config.toml", model=model)
+    cfg = load_config(toml)
+    assert cfg.model == model
+
+
+def test_load_config_rejects_unknown_model_in_toml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for var in _ALL_PQA_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
+    toml = _write_toml(tmp_path / "pqa-config.toml", model="gpt-4")
+    with pytest.raises(ValueError, match="model"):
+        load_config(toml)
+
+
+def test_load_config_rejects_unknown_model_via_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Env override must go through the same allowlist as TOML."""
+    monkeypatch.setenv("PQA_MODEL", "claude-4-not-a-real-alias")
+    toml = _write_toml(tmp_path / "pqa-config.toml", model="opus")
+    with pytest.raises(ValueError, match="model"):
+        load_config(toml)
+
+
+def test_load_config_rejects_empty_model_string(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Empty string is the easy fat-finger case — must fail closed."""
+    for var in _ALL_PQA_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
+    toml = _write_toml(tmp_path / "pqa-config.toml", model="")
+    with pytest.raises(ValueError, match="model"):
+        load_config(toml)
+
+
+def test_model_allowlist_matches_cost_pricing_aliases() -> None:
+    """The config allowlist must stay in sync with the cost-governor's pricing
+    table aliases. If the harness adds a model, both sides have to update."""
+    from pqa.config import _VALID_MODELS
+    from pqa.cost import MODEL_PRICING
+
+    # Pricing keys are the long form (claude-opus-4-7); allowlist is the short
+    # alias (opus). Verify each short alias maps to at least one priced model.
+    priced_short_aliases = {key.split("-")[1] for key in MODEL_PRICING}
+    assert priced_short_aliases >= _VALID_MODELS, (
+        f"allowlist {_VALID_MODELS - priced_short_aliases} have no pricing entry — "
+        "would break cost accounting at dispatch time"
+    )

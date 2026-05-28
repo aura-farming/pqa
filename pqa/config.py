@@ -41,6 +41,12 @@ _DEFAULTS: Final[dict[str, int | bool | str | float]] = {
 # The full set of valid [pqa] keys. Anything else is a typo / unknown key.
 _KNOWN_KEYS: Final[frozenset[str]] = frozenset(_DEFAULTS.keys())
 
+# The allowlist of valid `model` values. The harness uses the short alias
+# ("opus", "sonnet", "haiku") and translates to the concrete `claude-*` pricing
+# string via the cost-governor's MODEL_PRICING table. An unknown model here
+# would silently break cost accounting at dispatch time — fail closed at load.
+_VALID_MODELS: Final[frozenset[str]] = frozenset({"opus", "sonnet", "haiku"})
+
 # Mapping from PQA_* env var name to TOML key.
 _ENV_MAP: Final[dict[str, str]] = {
     "PQA_BRANCHES": "branches",
@@ -92,6 +98,10 @@ def _validate_model(value: object, *, origin: str) -> str:
     if not isinstance(value, str):
         raise TypeError(
             f"{origin}: 'model' must be str, got {type(value).__name__}={value!r}",
+        )
+    if value not in _VALID_MODELS:
+        raise ValueError(
+            f"{origin}: 'model' must be one of {sorted(_VALID_MODELS)}, got {value!r}",
         )
     return value
 
