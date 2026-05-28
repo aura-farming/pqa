@@ -141,6 +141,9 @@ def find_violation(command: str) -> str | None:
     return None
 
 
+MAX_COMMAND_BYTES: int = 65_536  # 64 KB — bounds regex backtracking time across all patterns
+
+
 def main() -> int:
     payload = read_payload()
     if payload is None:
@@ -151,6 +154,17 @@ def main() -> int:
     command = extract_command(payload)
     if not command:
         return 0
+    if len(command) > MAX_COMMAND_BYTES:
+        # An oversized command is treated as suspicious in itself: legitimate shell
+        # commands are not 64KB long. Bounding input length also bounds the worst-case
+        # regex backtracking time for every pattern below, which is the security
+        # property the timeout guard depends on.
+        sys.stderr.write(
+            f"PQA security gate: command too long ({len(command)} bytes > "
+            f"{MAX_COMMAND_BYTES}). Refusing to scan oversized input — split the "
+            "operation into smaller commands.\n"
+        )
+        return 2
     reason = find_violation(command)
     if reason is None:
         return 0

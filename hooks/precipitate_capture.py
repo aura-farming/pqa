@@ -27,6 +27,14 @@ from typing import Any, cast
 CONVICTION = re.compile(r"conviction:\s*(high|medium|low)\s*,\s*basis:\s*(.+)", re.IGNORECASE)
 PRECIPITATE = re.compile(r"PRECIPITATE:\s*(.+?)\s*::\s*(.+)", re.IGNORECASE)
 
+# Bound DB-inserted strings from transcripts. A compromised subagent or crafted
+# transcript could otherwise persist megabytes of attacker-controlled text into the
+# memory store, poisoning future frame-loads (precipitates feed the next run's frame).
+# Truncating at insert is cheap and reversible — schema-level CHECK constraints would
+# be stricter but break migrations.
+MAX_NAME_LEN: int = 200
+MAX_BASIS_LEN: int = 1_000
+
 
 def read_payload() -> dict[str, Any]:
     """Returns {} on any parse failure or non-dict payload. This hook is documented as
@@ -159,12 +167,12 @@ def persist(cwd: Path, session: str, text: str) -> bool:
                 conn.execute(
                     "INSERT INTO precipitates(session_id, name, rationale, created_at) "
                     "VALUES(?,?,?,?)",
-                    (session, name.strip(), why.strip(), ts),
+                    (session, name.strip()[:MAX_NAME_LEN], why.strip()[:MAX_BASIS_LEN], ts),
                 )
             for level, basis in CONVICTION.findall(text):
                 conn.execute(
                     "INSERT INTO signals(session_id, level, basis, created_at) VALUES(?,?,?,?)",
-                    (session, level.lower(), basis.strip(), ts),
+                    (session, level.lower(), basis.strip()[:MAX_BASIS_LEN], ts),
                 )
         conn.close()
         return True
@@ -177,10 +185,11 @@ def fallback_log(cwd: Path, session: str, text: str) -> None:
         "ts": int(time.time()),
         "session": session,
         "precipitates": [
-            {"name": n.strip(), "why": w.strip()} for n, w in PRECIPITATE.findall(text)
+            {"name": n.strip()[:MAX_NAME_LEN], "why": w.strip()[:MAX_BASIS_LEN]}
+            for n, w in PRECIPITATE.findall(text)
         ],
         "signals": [
-            {"level": level.lower(), "basis": basis.strip()}
+            {"level": level.lower(), "basis": basis.strip()[:MAX_BASIS_LEN]}
             for level, basis in CONVICTION.findall(text)
         ],
     }

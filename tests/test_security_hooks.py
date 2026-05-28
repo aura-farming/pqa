@@ -244,3 +244,112 @@ def test_existing_smoke_security_allow_git_status() -> None:
 def test_existing_smoke_secrets_guard_blocks_env() -> None:
     exit_code, _ = _run_hook("secrets_guard.py", {"tool_input": {"file_path": ".env"}})
     assert exit_code == 2
+
+
+# ---------------------------------------------------------------------------
+# security_gate.py — DoS guard on oversized command input.
+#
+# The DANGEROUS regex list contains patterns like `[^|]*` and `[^\n]*` that can
+# backtrack quadratically on adversarial input. The hook has a 10s timeout from
+# hooks.json, but a 100KB+ crafted command can push past it. Mitigation: cap the
+# command length at 64KB and reject anything larger fail-closed.
+
+
+def test_security_gate_rejects_oversized_command() -> None:
+    """A command past the size cap is blocked outright, before any regex runs."""
+    oversized = "echo " + ("A" * 70_000)  # 70KB, past the 64KB cap
+    exit_code, stderr = _run_hook("security_gate.py", {"tool_input": {"command": oversized}})
+    assert exit_code == 2
+    assert "too long" in stderr.lower() or "oversized" in stderr.lower()
+
+
+def test_security_gate_accepts_command_under_cap() -> None:
+    """A command at 60KB (under the 64KB cap) of benign content still scans normally."""
+    benign = "echo " + ("a" * 60_000)
+    exit_code, _ = _run_hook("security_gate.py", {"tool_input": {"command": benign}})
+    assert exit_code == 0
+
+
+def test_security_gate_oversized_dangerous_still_blocks() -> None:
+    """Oversized AND dangerous blocks on the size gate (which runs first)."""
+    oversized_dangerous = ("rm -rf / " * 100) + ("A" * 65_000)
+    exit_code, _ = _run_hook("security_gate.py", {"tool_input": {"command": oversized_dangerous}})
+    assert exit_code == 2
+
+
+# ---------------------------------------------------------------------------
+# verify_loop.py — cwd validation defends against payload tampering.
+
+
+def test_verify_loop_falls_back_when_payload_cwd_invalid(tmp_path: Path) -> None:
+    """A payload with a non-existent cwd must not crash the hook; non-.py path
+    exits early at 0."""
+    nonexistent = tmp_path / "does-not-exist"
+    exit_code, _ = _run_hook(
+        "verify_loop.py",
+        {
+            "cwd": str(nonexistent),
+            "tool_input": {"file_path": str(tmp_path / "x.txt")},
+        },
+    )
+    assert exit_code == 0
+
+
+# ---------------------------------------------------------------------------
+# precipitate_capture.py — length cap on DB-inserted strings.
+# Defence against memory-store poisoning by a compromised subagent emitting
+# megabytes of attacker-controlled text into a captured transcript.
+
+
+def test_precipitate_capture_truncates_oversized_strings(tmp_path: Path) -> None:
+    """A transcript with an absurdly long PRECIPITATE line must not write the full
+    string into the DB. Read back and verify caps."""
+    import sqlite3
+
+    db_dir = tmp_path / ".claude" / "hooks" / "memory"
+    db_dir.mkdir(parents=True)
+    db_path = db_dir / "pqa_memory.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        "CREATE TABLE precipitates(id INTEGER PRIMARY KEY, session_id TEXT, "
+        "name TEXT, rationale TEXT, created_at INTEGER)"
+    )
+    conn.execute(
+        "CREATE TABLE signals(id INTEGER PRIMARY KEY, session_id TEXT, "
+        "level TEXT, basis TEXT, created_at INTEGER)"
+    )
+    conn.commit()
+    conn.close()
+
+    transcript_dir = tmp_path / ".claude"
+    transcript_dir.mkdir(exist_ok=True)
+    transcript_path = transcript_dir / "transcript.jsonl"
+    huge_name = "n" * 10_000  # past 200 cap
+    huge_why = "w" * 50_000  # past 1000 cap
+    line = json.dumps(
+        {
+            "message": {
+                "role": "assistant",
+                "content": f"PRECIPITATE: {huge_name} :: {huge_why}",
+            }
+        }
+    )
+    transcript_path.write_text(line + "\n")
+
+    exit_code, _ = _run_hook(
+        "precipitate_capture.py",
+        {
+            "cwd": str(tmp_path),
+            "session_id": "s",
+            "transcript_path": str(transcript_path),
+        },
+    )
+    assert exit_code == 0
+
+    conn = sqlite3.connect(str(db_path))
+    rows = list(conn.execute("SELECT name, rationale FROM precipitates"))
+    conn.close()
+    assert rows, "PRECIPITATE was not inserted"
+    name, rationale = rows[0]
+    assert len(name) <= 200, f"name length {len(name)} exceeded 200 cap"
+    assert len(rationale) <= 1_000, f"rationale length {len(rationale)} exceeded 1000 cap"
