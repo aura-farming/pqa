@@ -17,13 +17,13 @@ PQA installs three ways. **No API key needed** — it runs on your existing Clau
 
 **As a plugin (recommended):**
 ```
-/plugin marketplace add <git-url-of-this-repo>
-/plugin install pqa
+/plugin marketplace add aura-farming/pqa
+/plugin install pqa@pqa-marketplace
 ```
 
 **Manually, project-level** (just this repo):
 ```bash
-git clone <git-url> && cd pqa
+git clone https://github.com/aura-farming/pqa.git && cd pqa
 ./scripts/install.sh project      # installs into ./.claude
 ```
 
@@ -72,6 +72,6 @@ Python 3.14.5 (stdlib-only harness core) · uv + pyproject.toml · Claude Code p
 
 `Draft` — Phase 0. Engine core (`collapse`, `signals`, `memory`) implemented and tested (16 tests, 95% coverage); invariant gate and hook smoke tests passing; instinct export/import working; full component catalog (34/59/27) generated. Next: the cost-governor budget cap and the single-pass baseline comparator, then true worktree parallelization.
 
-## Licence / subscription
+## Licence
 
-PQA is distributed as a paid subscription. See LICENSE / subscription terms.
+MIT. See [LICENSE](LICENSE).
