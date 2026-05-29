@@ -41,10 +41,13 @@ _DEFAULTS: Final[dict[str, int | bool | str | float]] = {
 # The full set of valid [pqa] keys. Anything else is a typo / unknown key.
 _KNOWN_KEYS: Final[frozenset[str]] = frozenset(_DEFAULTS.keys())
 
-# The allowlist of valid `model` values. The harness uses the short alias
-# ("opus", "sonnet", "haiku") and translates to the concrete `claude-*` pricing
-# string via the cost-governor's MODEL_PRICING table. An unknown model here
-# would silently break cost accounting at dispatch time — fail closed at load.
+# The allowlist of valid `model` values: the short aliases an operator sets in config.
+# NOTE: this is a declared *preference* only. Phase 0 dispatch and cost accounting use
+# the concrete `claude-*` key carried on each Branch (Branch.model / orchestrator
+# _DEFAULT_MODEL), NOT this field — there is no alias->pricing translation yet, and
+# cost.MODEL_PRICING is keyed on the concrete names. Before wiring cfg.model into a
+# Branch, add an alias->concrete map: these aliases are disjoint from the pricing keys,
+# so an unmapped alias would KeyError in cost_for at record time.
 _VALID_MODELS: Final[frozenset[str]] = frozenset({"opus", "sonnet", "haiku"})
 
 # Mapping from PQA_* env var name to TOML key.
