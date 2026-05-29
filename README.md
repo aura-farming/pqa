@@ -1,138 +1,127 @@
-<div align="center">
+# PQA — Passionate Quantum Absence
 
-# ⚛️ PQA — Passionate Quantum Absence
+[![Release](https://img.shields.io/github/v/release/aura-farming/pqa?style=flat-square&label=release&color=444)](https://github.com/aura-farming/pqa/releases)
+[![CI](https://img.shields.io/github/actions/workflow/status/aura-farming/pqa/ci.yml?style=flat-square&label=ci)](https://github.com/aura-farming/pqa/actions/workflows/ci.yml)
+[![License](https://img.shields.io/github/license/aura-farming/pqa?style=flat-square&color=444)](LICENSE)
+![Python](https://img.shields.io/badge/python-3.14+-444?style=flat-square)
 
-### Breakthrough coding through divergence and verified collapse.
+**Structured test-time compute for code, with a hard verifier gate.** PQA generates *N*
+topologically-distinct solutions to a task, has an adversary attack each, and ships only
+the branch that passes an executable verifier — tests, types, lint. The model's first,
+most-probable completion is never the default winner.
 
-[![Release](https://img.shields.io/github/v/release/aura-farming/pqa?color=8957e5&label=release)](https://github.com/aura-farming/pqa/releases)
-[![CI](https://github.com/aura-farming/pqa/actions/workflows/ci.yml/badge.svg)](https://github.com/aura-farming/pqa/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/github/license/aura-farming/pqa?color=2ea44f)](LICENSE)
-![Python](https://img.shields.io/badge/python-3.14+-3776ab)
-![Runs on Opus](https://img.shields.io/badge/runs%20on-Opus-d4a017)
-
-**A Claude Code plugin that refuses the single-pass default.** It holds several genuinely
-different solutions in *superposition*, attacks each one, and collapses onto the only
-branch that survives attack **and** the tests.
-
-</div>
+`superposition → collision → collapse` is best-of-*N* with **enforced diversity**,
+**adversarial critique**, and **verification-gated selection**. It's a Claude Code plugin;
+it runs on your subscription (every agent on Opus), no API key.
 
 ```text
 /plugin marketplace add aura-farming/pqa
 /plugin install pqa@pqa-marketplace
 ```
 
-> No API key needed — PQA runs on your existing Claude Code subscription. Every agent runs on **Opus**.
+## The idea
 
----
+A single pass returns the highest-*probability* completion — by construction, the generic
+one. PQA spends test-time compute to reach solutions a single pass won't, then resolves
+them on evidence rather than fluency:
 
-## Why PQA?
+- **Diversity is enforced, not hoped for.** Branches must differ in *topology* —
+  architecture, data model, control flow — and are generated blind to each other, so they
+  don't converge on one answer wearing different variable names.
+- **Critique is a separate adversary pass.** Each branch is attacked for edge cases,
+  failure modes, security, and unjustified complexity. The adversary breaks; it never fixes.
+- **Selection is gated on an executable verifier.** The survivor is the branch that passes
+  the real suite and resolves the most attacks — decided by `pytest` / types / lint, not by
+  a reward model or the model's own judgement. No suite? The result is flagged `UNVERIFIED`.
 
-The most *probable* answer is the generic one — the average of everything the model has
-already seen. PQA bets that the highest-**value** answer usually isn't the most probable:
-it lives in the low-probability region a single pass would never reach. So PQA spreads
-effort wide, then lets **evidence — not eloquence — decide** what survives.
+The one invariant: **selection is gated on the verifier.** Conviction, elegance, and "it
+feels right" change what gets *explored*, never what gets *accepted*. A high-conviction
+branch that fails its tests is a recorded failure, not a shipped feature. CI enforces this;
+there is no bypass.
 
-- **🌌 Divergence, not autocomplete** — branches that differ in *topology* (architecture, data model, control flow), generated blind to each other so they don't converge early.
-- **⚔️ Adversarial by default** — every branch is attacked: edge cases, failure modes, security holes, unjustified complexity, broken assumptions.
-- **💎 Evidence over eloquence** — the survivor is the branch that passes the real tests and resolves the most attacks. Conviction changes what gets *explored*, never what gets *accepted*.
+## How it relates to what you already know
 
-## The one rule that cannot be broken
-
-> **Nothing reaches a merge without passing the verifier.**
->
-> A high-conviction branch that fails its tests is a *recorded failure*, not a shipped
-> feature. An unverified coding harness just produces confident wrong code — the opposite
-> of useful. CI enforces this invariant; there is no bypass.
+| Technique | PQA's relation |
+|-----------|----------------|
+| **Best-of-*N* / sampling** | This is best-of-*N* — but diversity is enforced at the topology level rather than left to temperature, and candidates are generated blind. |
+| **Self-consistency** | Same "sample many, pick one" shape; the selector is an executable verifier, not a majority vote. |
+| **LLM debate / critique** | The adversary is a dedicated critic pass — but it only *attacks*. It never decides the winner. |
+| **Verifier / reward models** | The gate is a real test suite, grounded in execution rather than a learned proxy. A failing gate is final. |
+| **Reflexion / self-refine** | PQA records why each dead branch died and feeds it forward — but self-assessment never overrides the suite. |
 
 ## The loop
 
 ```mermaid
 flowchart LR
-  F["🔭 Frame"] --> S["🌌 Superpose"] --> C["⚔️ Collide"] --> V["✅ Collapse"] --> P["💎 Precipitate"]
-  P -. "sharpens the next run" .-> F
+  F["Frame"] --> S["Superpose"] --> C["Collide"] --> V["Collapse"] --> P["Precipitate"]
+  P -. "feeds the next run" .-> F
 ```
 
-| Stage | What happens |
-|-------|--------------|
-| **🔭 Frame** | Load two views — what the docs/research say, and what's true *in this context*. The gap is the first branching axis. |
-| **🌌 Superpose** | Spawn N branches (default 3) that differ in *kind*. At least one takes the non-obvious fork. |
-| **⚔️ Collide** | The adversary attacks every branch. It breaks them; it does not fix them. |
-| **✅ Collapse** | The verifier runs the real tests/types/lint. The survivor passes verification and resolves the most attacks. Ties break toward the bigger swing. |
-| **💎 Precipitate** | Name the winner and why it won; record every dead branch and why it died. Next run's frames are sharper for it. |
+| Stage | Mechanism |
+|-------|-----------|
+| **Frame** | Load a research view and an in-context self-eval view; their disagreement is the first branching axis. |
+| **Superpose** | Generate *N* candidates (default 3), topology-diverse and blind, with at least one forced onto the non-obvious fork. |
+| **Collide** | The adversary attacks every candidate — edge cases, failure modes, security, complexity. |
+| **Collapse** | The verifier runs the real tests/types/lint. The survivor passes verification and resolves the most findings; ties break toward the less incremental branch. |
+| **Precipitate** | Name the winner and why it won; record each dead branch and why it died — so the next run's frames are sharper. |
 
-Run the whole thing with **`/pqa <task>`**, or step through it: `/frame` → `/superpose` → `/collapse` → `/precipitate`.
+`/pqa <task>` runs the whole loop; `/frame → /superpose → /collapse → /precipitate` steps through it.
 
-## What you get
+## Measure it yourself
 
-- **34 agents · 59 skills · 27 commands** — every one PQA-native, built for one loop, none generic.
-- **Five enforcing hooks** (research gate, security gate, secrets guard, verify loop, precipitate capture) that make **auto mode** safe — they block dangerous ops even when permission prompts are off.
-- **Three continuous loops** that compound across runs *and across people*: precipitation (every run persists what won), human learning (`/instinct-export` · `/instinct-import`), and self-understanding (the harness calibrates its own conviction against outcomes).
-- **An update notice** — PQA tells you at session start when a newer release is out.
+The claims are meant to be falsifiable. `/baseline` captures the single-pass result for a
+task; `/eval` benchmarks PQA against that baseline over time. If PQA doesn't beat
+single-pass on your work, the harness will show you.
+
+## What's in the box
+
+- **34 agents · 59 skills · 27 commands** — purpose-built for the loop, not a generic pack.
+- **Five enforcing hooks** (research gate, security gate, secrets guard, verify loop,
+  precipitate capture) that keep autonomous *auto mode* safe: they block dangerous ops
+  even when permission prompts are off.
+- **Continuous learning** — named precipitates persist across runs; instincts export and
+  import across people (`/instinct-export`, `/instinct-import`).
+- **Update notice** at session start when a newer release is out.
 
 ## Install
 
-PQA installs three ways. It's built for **auto mode** (autonomous, classifier-gated); the hooks keep that safe.
-
-**As a plugin (recommended):**
 ```text
+# Plugin (recommended)
 /plugin marketplace add aura-farming/pqa
 /plugin install pqa@pqa-marketplace
 ```
 
-**Manually — project-level** (just this repo):
 ```bash
+# Manual — project-level (this repo) or system-level (all projects)
 git clone https://github.com/aura-farming/pqa.git && cd pqa
-./scripts/install.sh project      # installs into ./.claude
+./scripts/install.sh project      # or: system
 ```
 
-**Manually — system-level** (all your projects):
-```bash
-./scripts/install.sh system       # installs into ~/.claude
-```
-
-Then open Claude Code and run `/pqa <task>`.
-
-## The loop, in commands
-
-`/baseline` captures the single-pass result so you can measure the difference. `/spiral`
-goes another round. `/eval` benchmarks PQA against the baseline over time. Learning is
-portable: `/instinct-status` shows what PQA has learned (with confidence), `/evolve`
-clusters instincts into skills, and `/dashboard` renders the accumulating moat.
+Then run `/pqa <task>`. No API key — PQA uses your Claude Code subscription.
 
 ## Configuration
 
-PQA reads runtime settings from `pqa-config.toml` and/or `PQA_*` environment variables
-(precedence: **env > TOML > defaults**). The loader is stdlib-only (`tomllib`), strictly
-typed, and rejects wrong-typed values, unknown keys, non-finite budgets, and `memory_db`
-paths into system directories. See [`pqa-config.example.toml`](pqa-config.example.toml)
-for the full schema.
+Settings come from `pqa-config.toml` and/or `PQA_*` environment variables (precedence:
+**env > TOML > defaults**). The loader is stdlib-only (`tomllib`), strictly typed, and
+rejects wrong-typed values, unknown keys, non-finite budgets, and `memory_db` paths into
+system directories. See [`pqa-config.example.toml`](pqa-config.example.toml).
+
+## Built with · status
+
+Python 3.14 stdlib-only core · `uv` · `ruff` · `pyright --strict` · `pytest` + mutation
+testing as the collapse gate · SQLite (WAL) for memory · four CI workflows.
+
+**Phase 0.** The engine — frame, superpose, collide, collapse, precipitate, the cost
+governor, and the memory store — is implemented and CI-gated: 300+ tests, 95%+ coverage,
+the verifier-invariant gate and hook smoke tests green. Branches currently run in-context
+and sequentially; **next** is true git-worktree parallelization behind the same interface.
 
 ## Updating
 
-Releases are listed in [CHANGELOG.md](CHANGELOG.md) and published as
-[GitHub Releases](https://github.com/aura-farming/pqa/releases) — and PQA shows an update
-banner at session start when you're behind.
-
-- **Plugin install:** update through Claude Code's `/plugin` flow (re-sync `pqa-marketplace`).
-- **Manual install:** re-run the installer — copied hooks don't auto-update:
-  ```bash
-  git pull && ./scripts/install.sh project   # or: system
-  ```
-
-## How it's built
-
-Python 3.14 (stdlib-only harness core) · `uv` + `pyproject.toml` · Claude Code plugin
-(agents / skills / commands / hooks + `.claude-plugin/` manifests) · git worktrees for
-parallel branches · SQLite (WAL) for memory · `ruff` / `pyright --strict` / `pytest` +
-mutation testing as the collapse gate. Four CI workflows gate every change.
-
-## Status
-
-**Phase 0.** The engine core — frame, superpose, collide, collapse, precipitate, the
-cost governor, and the memory store — is implemented and CI-gated: **300+ tests, 95%+
-coverage**, the verifier-invariant gate and hook smoke tests green, instinct
-export/import working, the full 34 / 59 / 27 component catalog generated.
-**Next:** true git-worktree parallelization of branches.
+Releases are in [CHANGELOG.md](CHANGELOG.md) and published as
+[GitHub Releases](https://github.com/aura-farming/pqa/releases); PQA also shows a banner at
+session start when you're behind. Plugin installs update via `/plugin`; manual installs
+re-run `./scripts/install.sh` (copied hooks don't auto-update).
 
 ## License
 
