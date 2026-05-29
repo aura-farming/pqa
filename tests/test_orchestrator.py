@@ -379,6 +379,65 @@ def test_critical_unresolved_finding_kills_a_branch(conn: sqlite3.Connection):
 
 
 # ---------------------------------------------------------------------------
+# Quantum-jump tie-break (PQA's signature behavior) — end-to-end
+
+
+def test_quantum_jump_breaks_ties_toward_non_incremental(conn: sqlite3.Connection):
+    """force_non_obvious=1 makes b1 the non-incremental (quantum-jump) branch. When b0
+    and b1 tie on evidence (both verified, equal coverage, no findings), collapse must
+    break the tie toward the bigger swing — b1 — end-to-end through the orchestrator."""
+    report = run(
+        task="t",
+        session_id="s",
+        base_prompt="x",
+        research=_research(),
+        selfeval=_selfeval(),
+        generator=_make_generator(_divergent_outputs()),
+        adversary=_make_adversary([]),
+        verifier=_make_verifier(
+            {
+                "b0": VerifyResult(has_tests=True, verified=True, coverage=80.0),
+                "b1": VerifyResult(has_tests=True, verified=True, coverage=80.0),
+            }
+        ),
+        budget=Budget(max_usd=10.0),
+        conn=conn,
+        n_branches=2,
+        force_non_obvious=1,
+    )
+    assert report.survivor is not None
+    assert report.survivor.id == "b1"  # the non-incremental branch wins the tie
+    assert report.survivor.incremental is False
+
+
+def test_evidence_beats_quantum_jump(conn: sqlite3.Connection):
+    """The invariant: the quantum-jump preference breaks *ties only*; it never overrides
+    evidence. b1 is the non-incremental branch, but b0 has strictly higher coverage, so
+    b0 must win — proving non-incremental is the last tiebreak key, not a promotion."""
+    report = run(
+        task="t",
+        session_id="s",
+        base_prompt="x",
+        research=_research(),
+        selfeval=_selfeval(),
+        generator=_make_generator(_divergent_outputs()),
+        adversary=_make_adversary([]),
+        verifier=_make_verifier(
+            {
+                "b0": VerifyResult(has_tests=True, verified=True, coverage=90.0),
+                "b1": VerifyResult(has_tests=True, verified=True, coverage=70.0),
+            }
+        ),
+        budget=Budget(max_usd=10.0),
+        conn=conn,
+        n_branches=2,
+        force_non_obvious=1,
+    )
+    assert report.survivor is not None
+    assert report.survivor.id == "b0"  # higher-coverage branch wins despite being incremental
+
+
+# ---------------------------------------------------------------------------
 # Baseline comparison
 
 
