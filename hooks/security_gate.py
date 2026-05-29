@@ -71,9 +71,13 @@ DANGEROUS: list[tuple[str, str]] = [
         r"(\.env|id_rsa|id_ed25519|\.pem|credentials|\.aws/|\.ssh/|secrets?\.(ya?ml|json|toml))",
         "exfiltration of secret material",
     ),
-    # Reading a secret file via standard tools.
+    # Reading a secret file via standard tools. The reader list includes binary/byte
+    # readers (xxd, od, hexdump, strings, dd) and stream processors (sed, awk, grep)
+    # because each one reads a secret file just as effectively as `cat`; an earlier,
+    # cat-only list was trivially bypassed (e.g. `strings id_rsa`, `xxd .env`).
     (
-        r"\b(cat|less|more|head|tail|cp|scp|rsync|curl|wget|nc|ncat)\b[^\n]*"
+        r"\b(cat|less|more|head|tail|cp|scp|rsync|curl|wget|nc|ncat"
+        r"|xxd|od|hexdump|strings|dd|sed|awk|grep|egrep|fgrep)\b[^\n]*"
         r"(\.env(\.|$)|id_rsa\b|id_ed25519\b|\.pem\b|credentials\b|\.netrc\b|\.aws/|\.ssh/|secrets?\.(ya?ml|json|toml))",
         "access to a secret/key file",
     ),

@@ -24,6 +24,9 @@ import time
 from pathlib import Path
 from typing import Any, cast
 
+# NOTE: kept byte-identical to pqa/signals.py:_PATTERN. This hook is stdlib-only and must
+# run without the pqa package importable, so the regex is intentionally duplicated rather
+# than imported — change both together.
 CONVICTION = re.compile(r"conviction:\s*(high|medium|low)\s*,\s*basis:\s*(.+)", re.IGNORECASE)
 PRECIPITATE = re.compile(r"PRECIPITATE:\s*(.+?)\s*::\s*(.+)", re.IGNORECASE)
 

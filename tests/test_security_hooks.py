@@ -90,6 +90,29 @@ def test_security_gate_blocks(command: str) -> None:
 @pytest.mark.parametrize(
     "command",
     [
+        # Secret reads via tools that were NOT in the original denylist — the blocklist
+        # only covered cat/less/head/etc., so a binary reader trivially bypassed it.
+        "xxd .env",
+        "od -c .env",
+        "hexdump -C .env",
+        "strings id_rsa",
+        "strings ~/.ssh/id_rsa",
+        "dd if=id_ed25519",
+        "grep SECRET_KEY .env",
+        "sed -n 1p .env",
+        "awk '{print}' credentials",
+        "egrep . .aws/credentials",
+    ],
+)
+def test_security_gate_blocks_secret_reads_via_alt_readers(command: str) -> None:
+    """A secret read must be blocked regardless of which reader binary is used."""
+    exit_code, _stderr = _run_hook("security_gate.py", {"tool_input": {"command": command}})
+    assert exit_code == 2, f"security_gate failed to block secret read: {command!r}"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
         "git status",
         "ls -la",
         "uv run pytest",
@@ -99,6 +122,12 @@ def test_security_gate_blocks(command: str) -> None:
         "find . -name '*.py'",  # find without exec/delete
         "curl https://docs.example.com/api -o docs.json",  # download with -o but no exec chain
         "git config user.name 'me'",  # config but not hookspath
+        # Reader binaries are only dangerous when they target a secret path — these
+        # must still pass (pins the false-positive boundary for the alt-reader block).
+        "grep TODO main.py",
+        "sed -i 's/a/b/' README.md",
+        "awk '{print $1}' data.csv",
+        "strings ./bin/app",
     ],
 )
 def test_security_gate_allows_safe_commands(command: str) -> None:
