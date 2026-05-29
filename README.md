@@ -34,6 +34,25 @@ git clone https://github.com/aura-farming/pqa.git && cd pqa
 
 Then open Claude Code in your project and run `/pqa <task>`.
 
+## Updating
+
+Releases are tracked in [CHANGELOG.md](CHANGELOG.md) and published as
+[GitHub Releases](https://github.com/aura-farming/pqa/releases). How you pick up a new
+version depends on how you installed:
+
+- **Plugin install:** update through Claude Code's `/plugin` flow (re-sync the
+  `pqa-marketplace` source). The plugin tracks the marketplace repo, so a new release is
+  what signals there is something to pull.
+- **Manual install (`install.sh`):** the hooks, agents, skills, and commands were
+  **copied** into your `.claude` directory, so they do **not** update on their own.
+  Re-run the installer to pick up a release:
+  ```bash
+  git pull && ./scripts/install.sh project   # or: system
+  ```
+
+Security fixes to the enforcing hooks ship in point releases — if you run PQA in auto
+mode, re-installing after a release is recommended.
+
 ## The loop, in commands
 
 `/frame` (load research vs self-eval) → `/superpose` (divergent branches, one into the unknown) → `/collapse` (attack + verify + converge) → `/precipitate` (name + persist). Or just `/pqa <task>` to run the whole thing. `/baseline` captures the single-pass result so you can measure the difference; `/spiral` goes another round; `/eval` benchmarks against the baseline over time.
