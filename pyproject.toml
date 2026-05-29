@@ -1,6 +1,6 @@
 [project]
 name = "pqa"
-version = "0.2.4"
+version = "0.2.5"
 description = "Passionate Quantum Absence — co-precipitation made executable for code."
 readme = "README.md"
 requires-python = ">=3.14"

@@ -5,6 +5,12 @@ All notable changes to PQA are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.5] — 2026-05-29
+
+### Added
+- **Update notice**: a `SessionStart` hook (`hooks/update_check.py`) prints a one-line banner when a newer PQA release exists (`⬆️  PQA <new> available — you have <current>`). The GitHub Releases check is cached for 24h, times out fast, fails silent offline, and never blocks a session. Stdlib-only. Installed version ships in `hooks/PQA_VERSION` so both plugin and manual installs can self-identify.
+- Version-drift guard test: `hooks/PQA_VERSION`, `pyproject.toml`, and both plugin manifests must agree.
+
 ## [0.2.4] — 2026-05-29
 
 ### Security
@@ -37,7 +43,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Plugin made installable by anyone: MIT license, schema-valid manifests.
 
-[0.2.4]: https://github.com/aura-farming/pqa/releases/tag/v0.2.4
+[0.2.5]: https://github.com/aura-farming/pqa/releases/tag/v0.2.5
+[0.2.4]: https://github.com/aura-farming/pqa/compare/v0.2.4...v0.2.5
 [0.2.3]: https://github.com/aura-farming/pqa/compare/v0.2.3...v0.2.4
 [0.2.2]: https://github.com/aura-farming/pqa/compare/v0.2.2...v0.2.3
 [0.2.1]: https://github.com/aura-farming/pqa/compare/v0.2.1...v0.2.2
