@@ -336,7 +336,35 @@ def test_frame_record_has_resolved_by_after_run(conn: sqlite3.Connection):
     )
     row = conn.execute("SELECT resolved_by FROM frames").fetchone()
     assert row is not None
-    assert row[0] is not None  # filled in after collapse
+    # b0 wins (only verified branch); index 0 is even → the research side. Pin the
+    # VALUE, not just non-null, so a parity flip/off-by-one in _resolved_view is caught.
+    assert row[0] == "research"
+
+
+def test_frame_resolved_by_is_selfeval_when_odd_branch_wins(conn: sqlite3.Connection):
+    """Sibling of the above pinning the other parity arm: when an odd-indexed branch
+    (b1) is the survivor, _resolved_view must record the self-eval side. Together the
+    two tests pin both the parity rule and the survivor index lookup."""
+    run(
+        task="t",
+        session_id="s",
+        base_prompt="x",
+        research=_research(),
+        selfeval=_selfeval(),
+        generator=_make_generator(_divergent_outputs()),
+        adversary=_make_adversary([]),
+        verifier=_make_verifier(
+            {
+                "b0": VerifyResult(has_tests=True, verified=False, coverage=None),
+                "b1": VerifyResult(has_tests=True, verified=True, coverage=80.0),
+            }
+        ),
+        budget=Budget(max_usd=10.0),
+        conn=conn,
+    )
+    row = conn.execute("SELECT resolved_by FROM frames").fetchone()
+    assert row is not None
+    assert row[0] == "selfeval"
 
 
 # ---------------------------------------------------------------------------

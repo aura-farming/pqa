@@ -1,5 +1,5 @@
 ---
-description: Force a maximally low-probability exploration run via pqa-unknown-scout — bias every branch away from the obvious. Bound
+description: Force a maximally low-probability exploration run via pqa-unknown-scout — bias every branch away from the obvious....
 argument-hint: <task>
 ---
 

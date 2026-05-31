@@ -73,7 +73,7 @@ from pqa.frame import Frame, detect_disagreement, record_frame
 from pqa.sanitize import sanitize_research
 from pqa.memory import connect
 
-conn = connect(".claude/memory/pqa_memory.db")
+conn = connect(".claude/hooks/memory/pqa_memory.db")
 loaded = json.loads(open(".pqa/frame.json").read())
 research = sanitize_research(Frame(type="research", content=loaded["research"], source="frame-loader")).frame
 selfeval = Frame(type="selfeval", content=loaded["selfeval"], source="self-eval")

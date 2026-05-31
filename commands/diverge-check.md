@@ -1,5 +1,5 @@
 ---
-description: Run pqa-divergence-auditor on the current branches; report the divergence score and re-spawn with a sharper P_reframe if
+description: Run pqa-divergence-auditor on the current branches; report the divergence score and re-spawn with a sharper P_reframe...
 ---
 
 Run pqa-divergence-auditor on the current branches; report the divergence score and re-spawn with a sharper P_reframe if superposition has collapsed.

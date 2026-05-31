@@ -109,7 +109,7 @@ system directories. See [`pqa-config.example.toml`](pqa-config.example.toml).
 ## Built with · status
 
 Python 3.14 stdlib-only core · `uv` · `ruff` · `pyright --strict` · `pytest` + mutation
-testing as the collapse gate · SQLite (WAL) for memory · four CI workflows.
+testing as the collapse gate · SQLite for memory · four CI workflows.
 
 **Phase 0.** The engine — frame, superpose, collide, collapse, precipitate, the cost
 governor, and the memory store — is implemented and CI-gated: 300+ tests, 95%+ coverage,
