@@ -1,5 +1,5 @@
 ---
-description: Collide and converge the current superposition: pqa-adversary attacks every branch, pqa-verifier runs the real gate, pqa
+description: Collide and converge the current superposition: pqa-adversary attacks every branch, pqa-verifier runs the real gate,...
 ---
 
 Collide and converge the current superposition: pqa-adversary attacks every branch, pqa-verifier runs the real gate, pqa-collapse-judge picks the survivor on evidence.

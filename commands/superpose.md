@@ -1,5 +1,5 @@
 ---
-description: Spawn N divergent branches only (no collapse) via pqa-generator + pqa-unknown-scout, blind to each other, then stop so t
+description: Spawn N divergent branches only (no collapse) via pqa-generator + pqa-unknown-scout, blind to each other, then stop...
 argument-hint: <task>
 ---
 

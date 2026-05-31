@@ -16,9 +16,9 @@ branches = 3
 # the tests to gate every edit. The env equivalent is PQA_VERIFY_TESTS=1.
 verify_tests = false
 
-# Model name passed to subagents. The harness expects "opus", "sonnet", or
-# "haiku" but the loader does not pin an allowlist — any non-empty string
-# passes type validation. PQA defaults to "opus" because every agent runs
+# Model name passed to subagents. Must be one of "opus", "sonnet", or
+# "haiku" — any other value is rejected at load time by the config loader.
+# PQA defaults to "opus" because every agent runs
 # on the strongest available model by design.
 model = "opus"
 

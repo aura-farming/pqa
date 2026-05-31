@@ -1,5 +1,5 @@
 ---
-description: Export your learned instincts to a JSON file for sharing via scripts/instincts.py — your accumulated judgement becomes p
+description: Export your learned instincts to a JSON file for sharing via scripts/instincts.py — your accumulated judgement...
 argument-hint: <file>
 ---
 

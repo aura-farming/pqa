@@ -17,7 +17,7 @@ converge only on what survives attack AND tests.
   destructive/exfil ops, exit 2), secrets_guard (blocks subagents reading .env/keys, exit 2),
   verify_loop (lint/test after every edit, exit 2 on fail), precipitate_capture (persists
   precipitates + failures on SubagentStop).
-- `.claude/memory/schema.sql` — precipitates, failures, signals, frames.
+- `.claude/hooks/memory/schema.sql` — precipitates, failures, signals, frames.
 - `pqa/` — Python core: `collapse.py` (survivor selection — correctness heart),
   `signals.py` (conviction parsing), `memory.py` (persistence), `superposition.py` +
   `collision.py` (Phase scaffolds).
