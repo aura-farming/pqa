@@ -1,0 +1,34 @@
+# PQA configuration example — copy to `pqa-config.toml` and edit.
+#
+# Precedence is env > TOML > built-in defaults. PQA_* environment variables
+# always win over what's in this file. Every key in the [pqa] table is
+# strictly typed and validated at load time — wrong types, unknown keys,
+# missing files, and non-finite floats all raise. See `pqa/config.py`.
+
+[pqa]
+
+# Number of divergent branches per superposition. Must be a positive integer.
+# 3 is the recommended default (research + self-eval + forced non-obvious).
+branches = 3
+
+# Whether the post-edit verifier hook runs the full test suite. Default is
+# false (lint-only, fast). Set to true for collapse phases where you want
+# the tests to gate every edit. The env equivalent is PQA_VERIFY_TESTS=1.
+verify_tests = false
+
+# Model name passed to subagents. Must be one of "opus", "sonnet", or
+# "haiku" — any other value is rejected at load time by the config loader.
+# PQA defaults to "opus" because every agent runs
+# on the strongest available model by design.
+model = "opus"
+
+# Hard USD cap for one PQA run. Must be a finite positive float. Inf/nan
+# and non-positive values are rejected at load time so the cost-tracker
+# budget gate cannot be bypassed by misconfiguration.
+run_budget_usd = 15.0
+
+# Path to the sqlite memory database that holds frames, precipitates, and
+# failure taxonomies across sessions. Paths into system directories
+# (/etc, /usr, /var, /sys, /proc, /dev, /boot, /root, /bin, /sbin, /lib,
+# /lib64, /System) are rejected to prevent accidental writes there.
+memory_db = ".claude/hooks/memory/pqa_memory.db"

@@ -1,5 +1,5 @@
 ---
-description: Import instincts shared by others from a JSON file into your memory via scripts/instincts.py — continuous learning acros
+description: Import instincts shared by others from a JSON file into your memory via scripts/instincts.py — continuous learning...
 argument-hint: <file>
 ---
 

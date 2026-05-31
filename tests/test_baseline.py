@@ -205,3 +205,116 @@ def test_compare_returns_comparison_with_all_fields():
     assert c.pqa_tests_pass is True
     assert c.verdict in {"pqa_wins", "baseline_wins", "tie"}
     assert c.rationale  # non-empty
+
+
+# ---------------------------------------------------------------------------
+# Cost-regression verdict (audit finding #4)
+
+
+def test_both_pass_different_solution_with_cost_regression_is_tie():
+    """A working different solution that cost 50x more than the baseline does not
+    cleanly win — the cost overhead disqualifies it. Operator sees the trade-off
+    in the verdict instead of finding it later in a token-delta column."""
+    baseline = _bl(response="def add(a, b): return a + b", tokens_used=100, tests_pass=True)
+    c = compare(
+        baseline,
+        pqa_response=(
+            "import asyncio\n"
+            "class Adder:\n"
+            "    async def add(self, *args):\n"
+            "        return sum(args)\n"
+        ),
+        pqa_tokens_used=10_000,  # 100x baseline — far above COST_REGRESSION_FACTOR (10x)
+        pqa_tests_pass=True,
+    )
+    assert c.verdict == "tie"
+    assert "cost" in c.rationale.lower()
+
+
+def test_both_pass_different_solution_with_modest_cost_is_pqa_win():
+    """A working different solution at ~3-5x cost is the expected PQA spend (N
+    branches + adversary + verifier). Should still win because the spend is
+    proportionate to the quality gain."""
+    baseline = _bl(response="def add(a, b): return a + b", tokens_used=1000, tests_pass=True)
+    c = compare(
+        baseline,
+        pqa_response=(
+            "import asyncio\n"
+            "class Adder:\n"
+            "    async def add(self, *args):\n"
+            "        return sum(args)\n"
+        ),
+        pqa_tokens_used=4_000,  # 4x baseline — under the 10x threshold
+        pqa_tests_pass=True,
+    )
+    assert c.verdict == "pqa_wins"
+
+
+def test_pqa_finds_working_solution_even_when_cost_regressed_still_wins():
+    """If single-pass produced nothing workable, solving the problem at all is the
+    dominant signal. Cost regression doesn't override this — something that works
+    beats nothing."""
+    baseline = _bl(response="stub", tokens_used=50, tests_pass=False)
+    c = compare(
+        baseline,
+        pqa_response="def real(): return 1",
+        pqa_tokens_used=10_000,  # massive overhead vs the failing stub
+        pqa_tests_pass=True,
+    )
+    assert c.verdict == "pqa_wins"
+
+
+def test_cost_regression_not_triggered_when_baseline_tokens_zero():
+    """Degenerate baseline (zero tokens recorded) — the ratio is undefined and
+    we should NOT inject a regression verdict on a divide-by-zero."""
+    baseline = _bl(response="def x(): pass", tokens_used=0, tests_pass=True)
+    c = compare(
+        baseline,
+        pqa_response="async def x():\n    await something()\n    return 1",
+        pqa_tokens_used=10_000,
+        pqa_tests_pass=True,
+    )
+    assert c.verdict == "pqa_wins"
+
+
+# ---------------------------------------------------------------------------
+# RunReport immutability (audit finding #7)
+
+
+def test_run_report_branches_is_a_tuple_not_a_list():
+    """frozen=True does not prevent mutating list contents. Storing branches as a
+    tuple makes immutability structural — `.append(...)` raises AttributeError."""
+    from pqa.collapse import BranchResult, CollapseOutcome
+    from pqa.orchestrator import RunReport
+    from pqa.superposition import Branch
+
+    rr = RunReport(
+        task="t",
+        session_id="s",
+        survivor=None,
+        survivor_result=None,
+        collapse=CollapseOutcome(None, "", False, ""),
+        divergence=None,
+        cost_report="",
+        baseline_comparison=None,
+        branches=(Branch(id="b0", prompt="p"),),
+        branch_results=(
+            BranchResult(
+                name="b0",
+                verified=True,
+                has_tests=False,
+                coverage=None,
+                findings_resolved=0,
+                findings_total=0,
+                conviction=None,
+                incremental=True,
+            ),
+        ),
+        aborted=False,
+        abort_reason=None,
+        started_at=0,
+        finished_at=0,
+    )
+    assert isinstance(rr.branches, tuple)
+    assert isinstance(rr.branch_results, tuple)
+    assert not hasattr(rr.branches, "append")

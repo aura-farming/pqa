@@ -97,8 +97,11 @@ class RunReport:
     divergence: DivergenceReport | None
     cost_report: str
     baseline_comparison: Comparison | None
-    branches: list[Branch]
-    branch_results: list[BranchResult]
+    # Tuples not lists — frozen=True prevents rebinding the fields but does not prevent
+    # mutating the list contents. A caller doing report.branches.append(...) would mutate
+    # the report silently. tuple makes the immutability structural rather than nominal.
+    branches: tuple[Branch, ...]
+    branch_results: tuple[BranchResult, ...]
     aborted: bool
     abort_reason: str | None
     started_at: int
@@ -130,8 +133,8 @@ def _aborted_report(
         divergence=divergence,
         cost_report=governor.report(),
         baseline_comparison=None,
-        branches=branches,
-        branch_results=branch_results,
+        branches=tuple(branches),
+        branch_results=tuple(branch_results),
         aborted=True,
         abort_reason=reason,
         started_at=started_at,
@@ -363,8 +366,8 @@ def run(
         divergence=divergence,
         cost_report=governor.report(),
         baseline_comparison=baseline_comparison,
-        branches=branches,
-        branch_results=branch_results,
+        branches=tuple(branches),
+        branch_results=tuple(branch_results),
         aborted=False,
         abort_reason=None,
         started_at=started_at,
