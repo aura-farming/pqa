@@ -1,5 +1,5 @@
 ---
-description: Merge the survivor and prune all ephemeral worktrees/branches via pqa-reconciler, then open the PR. Idempotent even if c
+description: Merge the survivor and prune all ephemeral worktrees/branches via pqa-reconciler, then open the PR. Idempotent even...
 ---
 
 Merge the survivor and prune all ephemeral worktrees/branches via pqa-reconciler, then open the PR. Idempotent even if collapse failed.

@@ -12,6 +12,7 @@ Run:  python scripts/generate_components.py
 from __future__ import annotations
 
 import json
+import textwrap
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -322,7 +323,7 @@ COMMANDS: list[dict[str, str]] = [
     {
         "name": "perturb",
         "arghint": "<P_collapse|P_reframe|P_deepen|P_name> <target>",
-        "action": "Apply a named perturbation operator to the current state — collapse a rigid assumption, refuse a frame, demand self-eval, or crystallise an unnamed precipitate.",
+        "action": "Apply a named perturbation operator to the current state via the perturbation-operators skill (or pqa-human-perturbation) — collapse a rigid assumption, refuse a frame, demand self-eval, or crystallise an unnamed precipitate.",
     },
     {
         "name": "verify",
@@ -357,7 +358,7 @@ COMMANDS: list[dict[str, str]] = [
     {
         "name": "evolve",
         "arghint": "",
-        "action": "Cluster high-confidence instincts into a new skill so accumulated learning becomes reusable workflow.",
+        "action": "Cluster high-confidence instincts into a new skill via pqa-instinct-synthesizer so accumulated learning becomes reusable workflow.",
     },
     {
         "name": "report",
@@ -397,7 +398,7 @@ COMMANDS: list[dict[str, str]] = [
     {
         "name": "install",
         "arghint": "<project|system>",
-        "action": "Configure PQA at project (./.claude) or system (~/.claude) level; wires hooks, agents, skills, commands, and initialises memory.",
+        "action": "Configure PQA at project (./.claude) or system (~/.claude) level via scripts/install.sh; wires hooks, agents, skills, commands, and initialises memory.",
     },
     {
         "name": "cost",
@@ -813,8 +814,12 @@ honestly — uncertainty expressed beats certainty performed.
 def render_command(c: dict[str, str]) -> str:
     hint = f"\nargument-hint: {c['arghint']}" if c["arghint"] else ""
     args = " $ARGUMENTS" if c["arghint"] else ""
+    # Word-boundary-safe truncation for the picker blurb: textwrap.shorten cuts on a
+    # whole word and appends an ellipsis only when it actually trims, so descriptions no
+    # longer end mid-word. The full instruction is always emitted in the body below.
+    description = textwrap.shorten(c["action"], width=120, placeholder="...")
     return f"""---
-description: {c["action"][:120]}{hint}
+description: {description}{hint}
 ---
 
 {c["action"]}{(" Task:" + args) if c["arghint"] else ""}

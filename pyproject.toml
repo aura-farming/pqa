@@ -1,6 +1,6 @@
 [project]
 name = "pqa"
-version = "0.1.0"
+version = "0.2.5"
 description = "Passionate Quantum Absence — co-precipitation made executable for code."
 readme = "README.md"
 requires-python = ">=3.14"
@@ -14,7 +14,7 @@ dependencies = []  # the harness core is stdlib-only by design
 dev = [
     "pytest>=9.0",
     "pytest-cov>=6.0",
-    "ruff>=0.15",
+    "ruff>=0.15.15",
     "pyright>=1.1.409",
     "pre-commit>=4.0",
     "pip-audit>=2.7",
@@ -39,11 +39,21 @@ select = ["E", "W", "F", "I", "B", "UP", "SIM", "S", "PTH", "RUF"]
 ignore = []
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101"]                       # assert is expected in tests
+"tests/**" = ["S101", "S603", "S607"]       # assert + subprocess invocations are expected in tests
 "scripts/generate_components.py" = [
     "E501",                                 # catalog of agent/skill/command descriptions — one entry per line
     "S101",                                 # sanity assertions on the catalog at the bottom of the file
 ]
+"hooks/security_gate.py" = ["E501"]         # DANGEROUS regex table reads better one entry per line
+
+[tool.ruff.lint.isort]
+# Declare first-party packages explicitly. Without this, ruff classifies them
+# by *disk presence* — so `from pqa.config import ...` is third-party until
+# `pqa/config/` exists, then becomes first-party. That shifts where I001
+# requires blank-line separators across worktrees and produces phantom
+# lint failures on locked test files. Locking the classification keeps
+# `ruff format` and `ruff check` in agreement.
+known-first-party = ["pqa", "config", "hooks", "scripts"]
 
 [tool.ruff.format]
 quote-style = "double"

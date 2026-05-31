@@ -1,5 +1,5 @@
 ---
-description: Run the verifier gate standalone via pqa-verifier: tests, types, lint, coverage, mutation. Report objective numbers as t
+description: Run the verifier gate standalone via pqa-verifier: tests, types, lint, coverage, mutation. Report objective numbers...
 ---
 
 Run the verifier gate standalone via pqa-verifier: tests, types, lint, coverage, mutation. Report objective numbers as the confidence qualifier.

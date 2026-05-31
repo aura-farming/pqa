@@ -12,6 +12,9 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+# NOTE: kept byte-identical to hooks/precipitate_capture.py:CONVICTION. The hook cannot
+# import this module (hooks are stdlib-only and must run without the pqa package on the
+# path), so the regex is intentionally duplicated — change both together.
 _PATTERN = re.compile(r"conviction:\s*(high|medium|low)\s*,\s*basis:\s*(.+)", re.IGNORECASE)
 _LEVELS = {"high", "medium", "low"}
 

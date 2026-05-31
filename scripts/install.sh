@@ -45,4 +45,4 @@ sqlite3 "$DEST/hooks/memory/pqa_memory.db" < "$SRC/hooks/memory/schema.sql" 2>/d
   && echo "  memory initialised" || echo "  (install sqlite3 to initialise memory; /precipitate will create it on first run)"
 
 echo "Done. Open Claude Code in your project and run /pqa to start."
-echo "Note: agents run on Opus — set ANTHROPIC_API_KEY and mind the per-run budget (/budget)."
+echo "Note: agents run on Opus — no API key needed (PQA uses your Claude Code subscription); mind the per-run budget (/budget)."

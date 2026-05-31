@@ -1,5 +1,5 @@
 ---
-description: Run another co-precipitation round on the current result via pqa-spiral-coordinator — re-collide the precipitate against
+description: Run another co-precipitation round on the current result via pqa-spiral-coordinator — re-collide the precipitate...
 ---
 
 Run another co-precipitation round on the current result via pqa-spiral-coordinator — re-collide the precipitate against fresh frames; stop when depth stops paying.

@@ -33,6 +33,23 @@ def changed_path(payload: dict[str, Any]) -> str | None:
     return str(path) if path else None
 
 
+def _safe_cwd(payload: dict[str, Any]) -> str:
+    """Validate `cwd` before passing it to subprocess. A crafted payload pointing at
+    /tmp/evil would otherwise let ruff/pytest pick up a malicious pyproject.toml or
+    pytest plugin from there. Trust `cwd` only if it resolves to an existing directory;
+    otherwise fall back to the process's own cwd (set by the hook runner, not by the
+    payload)."""
+    raw = payload.get("cwd")
+    if isinstance(raw, str) and raw:
+        candidate = Path(raw)
+        try:
+            if candidate.is_dir():
+                return str(candidate)
+        except OSError:
+            pass
+    return str(Path.cwd())
+
+
 def run(cmd: list[str], cwd: str) -> tuple[int, str]:
     try:
         # ruff/pytest are project-controlled tool names from the hook itself, not user input.
@@ -48,7 +65,7 @@ def run(cmd: list[str], cwd: str) -> tuple[int, str]:
 
 def main() -> int:
     payload = read_payload()
-    cwd = payload.get("cwd") or str(Path.cwd())
+    cwd = _safe_cwd(payload)
     path = changed_path(payload)
     if not path or not path.endswith(".py"):
         return 0
@@ -57,7 +74,9 @@ def main() -> int:
 
     problems: list[str] = []
 
-    lint_rc, lint_out = run(["ruff", "check", path], cwd)
+    # `--` end-of-options separator: ensures a path beginning with `-` is treated as a
+    # path, not as a ruff flag. Defense-in-depth — `path` is already validated to exist.
+    lint_rc, lint_out = run(["ruff", "check", "--", path], cwd)
     if lint_rc != 0 and lint_out.strip():
         problems.append(f"ruff:\n{lint_out.strip()}")
 
