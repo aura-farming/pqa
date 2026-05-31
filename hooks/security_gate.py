@@ -36,6 +36,13 @@ DANGEROUS: list[tuple[str, str]] = [
         "force-push to protected branch",
     ),
     (r"\bgit\s+push\s+--force(?!-with-lease)\b", "blind force-push (use --force-with-lease)"),
+    # `-f` is git's documented short alias for `--force` (`git push -h`: "-f, --force").
+    # Match any single-dash flag cluster containing `f` (e.g. `-f`, `-fq`, `-uf`) as a
+    # whitespace-delimited token, so a branch name like `my-feature` — where `-f` is
+    # mid-word, not a flag — does not trip the gate. Among git push short flags only
+    # `-f` carries the letter f (others are -u/-q/-v/-n/-d/-o), so there is no benign
+    # match: this closes the short-form bypass of both force-push patterns above.
+    (r"\bgit\s+push\b[^\n]*(?<!\S)-[a-z]*f[a-z]*\b", "force-push (short -f flag)"),
     (r"\bgit\s+config\b[^\n]*\bcore\.hookspath\b", "git hookspath override"),
     (r"\bgit\s+filter-(branch|repo)\b", "destructive git history rewrite"),
     # --- Pipe-to-shell + download-then-execute --------------------------------------

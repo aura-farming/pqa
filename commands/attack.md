@@ -1,5 +1,5 @@
 ---
-description: Run pqa-adversary (and pqa-security-adversary where relevant) on the current code standalone — find where it breaks with
+description: Run pqa-adversary (and pqa-security-adversary where relevant) on the current code standalone — find where it breaks...
 ---
 
 Run pqa-adversary (and pqa-security-adversary where relevant) on the current code standalone — find where it breaks without fixing it.

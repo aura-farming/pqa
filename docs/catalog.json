@@ -176,7 +176,7 @@
     },
     {
       "name": "perturb",
-      "action": "Apply a named perturbation operator to the current state \u2014 collapse a rigid assumption, refuse a frame, demand self-eval, or crystallise an unnamed precipitate."
+      "action": "Apply a named perturbation operator to the current state via the perturbation-operators skill (or pqa-human-perturbation) \u2014 collapse a rigid assumption, refuse a frame, demand self-eval, or crystallise an unnamed precipitate."
     },
     {
       "name": "verify",
@@ -204,7 +204,7 @@
     },
     {
       "name": "evolve",
-      "action": "Cluster high-confidence instincts into a new skill so accumulated learning becomes reusable workflow."
+      "action": "Cluster high-confidence instincts into a new skill via pqa-instinct-synthesizer so accumulated learning becomes reusable workflow."
     },
     {
       "name": "report",
@@ -236,7 +236,7 @@
     },
     {
       "name": "install",
-      "action": "Configure PQA at project (./.claude) or system (~/.claude) level; wires hooks, agents, skills, commands, and initialises memory."
+      "action": "Configure PQA at project (./.claude) or system (~/.claude) level via scripts/install.sh; wires hooks, agents, skills, commands, and initialises memory."
     },
     {
       "name": "cost",

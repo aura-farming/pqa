@@ -1,5 +1,5 @@
 ---
-description: Load and contrast the research frame and the self-eval frame via pqa-frame-loader; name the disagreements that become br
+description: Load and contrast the research frame and the self-eval frame via pqa-frame-loader; name the disagreements that become...
 argument-hint: <task>
 ---
 

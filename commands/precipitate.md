@@ -1,5 +1,5 @@
 ---
-description: Name the winning insight and persist it plus the full failure taxonomy via pqa-memory-curator and pqa-failure-taxonomist
+description: Name the winning insight and persist it plus the full failure taxonomy via pqa-memory-curator and pqa-failure-...
 argument-hint: <name> :: <why>
 ---
 

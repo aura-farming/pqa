@@ -1,5 +1,5 @@
 ---
-description: Render the accumulating PQA moat via scripts/dashboard.py — precipitates, failure taxonomy, conviction calibration. Stdl
+description: Render the accumulating PQA moat via scripts/dashboard.py — precipitates, failure taxonomy, conviction calibration....
 ---
 
 Render the accumulating PQA moat via scripts/dashboard.py — precipitates, failure taxonomy, conviction calibration. Stdlib CLI, no GUI deps.

@@ -1,5 +1,5 @@
 ---
-description: Show learned instincts with confidence scores and supporting evidence via pqa-instinct-synthesizer — the human-facing vi
+description: Show learned instincts with confidence scores and supporting evidence via pqa-instinct-synthesizer — the human-facing...
 ---
 
 Show learned instincts with confidence scores and supporting evidence via pqa-instinct-synthesizer — the human-facing view of what PQA has learned.

@@ -1,5 +1,5 @@
 -- PQA memory schema. Persistent across sessions. Stdlib sqlite3.
--- Initialise with:  sqlite3 .claude/memory/pqa_memory.db < .claude/memory/schema.sql
+-- Initialise with:  sqlite3 .claude/hooks/memory/pqa_memory.db < .claude/hooks/memory/schema.sql
 
 -- Named precipitates: the winning insight from a run and why it won.
 CREATE TABLE IF NOT EXISTS precipitates (

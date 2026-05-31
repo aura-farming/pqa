@@ -63,7 +63,7 @@ The self-eval frame is the one Claude is most prone to skip in favour of "best p
 Before emitting the frames, query the failure taxonomy:
 
 ```bash
-python -c "from pqa.memory import connect, recent_failures; print(recent_failures(connect('.claude/memory/pqa_memory.db'), limit=10))"
+python -c "from pqa.memory import connect, recent_failures; print(recent_failures(connect('.claude/hooks/memory/pqa_memory.db'), limit=10))"
 ```
 
 If a recent failure matches the current task's shape, surface it in your `selfeval` text. The harness should not re-propose a known-dead approach.
