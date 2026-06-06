@@ -18,7 +18,7 @@ dev = [
     "pyright>=1.1.409",
     "pre-commit>=4.0",
     "pip-audit>=2.7",
-    "mutmut>=3.0",        # mutation testing — guards against tests that pass but assert nothing
+    "mutmut>=3.6.0",        # mutation testing — guards against tests that pass but assert nothing
 ]
 
 # PQA distributes as a Claude Code plugin (see .claude-plugin/), not a pip package.
