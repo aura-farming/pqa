@@ -19,6 +19,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from hook_common import is_disabled
+
 
 def read_payload() -> dict[str, Any]:
     try:
@@ -64,6 +66,8 @@ def run(cmd: list[str], cwd: str) -> tuple[int, str]:
 
 
 def main() -> int:
+    if is_disabled("verify_loop"):
+        return 0
     payload = read_payload()
     cwd = _safe_cwd(payload)
     path = changed_path(payload)

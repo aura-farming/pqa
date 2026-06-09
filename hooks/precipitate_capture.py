@@ -24,6 +24,8 @@ import time
 from pathlib import Path
 from typing import Any, cast
 
+from hook_common import is_disabled
+
 # NOTE: kept byte-identical to pqa/signals.py:_PATTERN. This hook is stdlib-only and must
 # run without the pqa package importable, so the regex is intentionally duplicated rather
 # than imported — change both together.
@@ -205,6 +207,8 @@ def fallback_log(cwd: Path, session: str, text: str) -> None:
 
 
 def main() -> int:
+    if is_disabled("precipitate_capture"):
+        return 0
     payload = read_payload()
     cwd = _safe_cwd(payload.get("cwd"))
     session = str(payload.get("session_id", "unknown"))
@@ -214,6 +218,10 @@ def main() -> int:
 
     if text and not persist(cwd, session, text):
         fallback_log(cwd, session, text)
+        sys.stderr.write(
+            "PQA precipitate capture: memory DB unavailable; captured to "
+            ".claude/memory/capture_fallback.jsonl instead.\n"
+        )
     return 0  # never block
 
 
