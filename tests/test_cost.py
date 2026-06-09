@@ -13,9 +13,11 @@ from pqa.cost import MODEL_PRICING, Budget, CostGovernor, Spend, cost_for
 
 
 def test_cost_for_opus_pricing():
-    # Opus 4.7: $15/Mtok input, $75/Mtok output.
-    assert cost_for("claude-opus-4-7", 1_000_000, 0) == pytest.approx(15.0)
-    assert cost_for("claude-opus-4-7", 0, 1_000_000) == pytest.approx(75.0)
+    # Opus 4.7/4.8: $5/Mtok input, $25/Mtok output (see PRICING_AS_OF in pqa/cost.py).
+    assert cost_for("claude-opus-4-7", 1_000_000, 0) == pytest.approx(5.0)
+    assert cost_for("claude-opus-4-7", 0, 1_000_000) == pytest.approx(25.0)
+    assert cost_for("claude-opus-4-8", 1_000_000, 0) == pytest.approx(5.0)
+    assert cost_for("claude-opus-4-8", 0, 1_000_000) == pytest.approx(25.0)
 
 
 def test_cost_for_sonnet_is_cheaper_than_opus():
@@ -234,8 +236,8 @@ def test_would_abort_at_exact_cap_boundary_is_true():
 def test_would_abort_opus_costs_more_than_sonnet():
     g = CostGovernor(Budget(max_usd=1.0))
     # Same token counts, different models — Opus must be more likely to abort.
-    sonnet_aborts = g.would_abort("claude-sonnet-4-6", 100_000, 0)  # $0.30
-    opus_aborts = g.would_abort("claude-opus-4-7", 100_000, 0)  # $1.50
+    sonnet_aborts = g.would_abort("claude-sonnet-4-6", 300_000, 0)  # $0.90
+    opus_aborts = g.would_abort("claude-opus-4-7", 300_000, 0)  # $1.50
     assert sonnet_aborts is False
     assert opus_aborts is True
 
@@ -259,7 +261,7 @@ def test_would_abort_zero_projection_reflects_current_state_only():
     # Zero projection on empty governor: clearly fine.
     assert g.would_abort("claude-opus-4-7", 0, 0) is False
     # Push past cap, then zero projection still reports abort.
-    g.record("b", "claude-opus-4-7", 100_000, 0)  # $1.50, over cap
+    g.record("b", "claude-opus-4-7", 300_000, 0)  # $1.50, over cap
     assert g.would_abort("claude-opus-4-7", 0, 0) is True
 
 

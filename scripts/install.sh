@@ -40,9 +40,19 @@ hp.write_text(json.dumps(fix(data), indent=2))
 print("  hook paths rewritten to", dest)
 PY
 
-# initialise memory
-sqlite3 "$DEST/hooks/memory/pqa_memory.db" < "$SRC/hooks/memory/schema.sql" 2>/dev/null \
-  && echo "  memory initialised" || echo "  (install sqlite3 to initialise memory; /precipitate will create it on first run)"
+# initialise memory through the SINGLE schema source: the migration runner.
+# Seeding from a separate schema file drifts from pqa/migrations — that class of
+# bug is why this goes through pqa.memory.connect() (creates dirs, applies any
+# pending migrations, idempotent on an up-to-date DB).
+PYTHONPATH="$SRC" python3 -c "from pqa.memory import connect; connect(r'''$DEST/hooks/memory/pqa_memory.db''').close()" \
+  && echo "  memory initialised (migrations applied)" \
+  || echo "  (memory init deferred; /pqa will create it on first run)"
+
+# runtime dir for file-based stage handoffs (frame.json, branch digests, state.json)
+if [[ "$MODE" == "project" ]]; then
+  mkdir -p "$(pwd)/.pqa"
+  echo "  created .pqa/ runtime dir"
+fi
 
 echo "Done. Open Claude Code in your project and run /pqa to start."
-echo "Note: agents run on Opus — no API key needed (PQA uses your Claude Code subscription); mind the per-run budget (/budget)."
+echo "Note: PQA routes models per role (Opus only where judgment demands it); no API key needed — runs on your Claude Code subscription. Mind the budget (/budget, /cost)."

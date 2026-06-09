@@ -26,6 +26,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, cast
 
+from pqa.cost import resolve_model
+
 # ---------------------------------------------------------------------------
 # Loader-owned defaults. The values mirror config/settings.py but the source
 # is THIS module so we do not inherit `os.getenv`-at-import semantics from it.
@@ -34,7 +36,14 @@ _DEFAULTS: Final[dict[str, int | bool | str | float]] = {
     "branches": 3,
     "verify_tests": False,
     "model": "opus",
-    "run_budget_usd": 15.0,
+    # Budget defaults are sized so a routed N=3 run (see the orchestrator's model
+    # routing table) completes with headroom. Tokens are the PRIMARY ledger; USD is
+    # the secondary cap and display currency. One source of truth: the orchestrator
+    # derives its budget from here, never from a number hardcoded in a prompt.
+    "run_budget_usd": 5.0,
+    "run_budget_tokens": 800_000,
+    "max_spiral_depth": 1,
+    "branches_mode": "context",
     "memory_db": ".claude/hooks/memory/pqa_memory.db",
 }
 
@@ -42,13 +51,14 @@ _DEFAULTS: Final[dict[str, int | bool | str | float]] = {
 _KNOWN_KEYS: Final[frozenset[str]] = frozenset(_DEFAULTS.keys())
 
 # The allowlist of valid `model` values: the short aliases an operator sets in config.
-# NOTE: this is a declared *preference* only. Phase 0 dispatch and cost accounting use
-# the concrete `claude-*` key carried on each Branch (Branch.model / orchestrator
-# _DEFAULT_MODEL), NOT this field — there is no alias->pricing translation yet, and
-# cost.MODEL_PRICING is keyed on the concrete names. Before wiring cfg.model into a
-# Branch, add an alias->concrete map: these aliases are disjoint from the pricing keys,
-# so an unmapped alias would KeyError in cost_for at record time.
-_VALID_MODELS: Final[frozenset[str]] = frozenset({"opus", "sonnet", "haiku"})
+# Aliases resolve to concrete pricing/dispatch keys via pqa.cost.resolve_model — see
+# PQAConfig.resolved_model(). The allowlist and pqa.cost.MODEL_ALIASES must stay in
+# lockstep; tests/test_config.py asserts every alias here resolves to a pricing key.
+_VALID_MODELS: Final[frozenset[str]] = frozenset({"fable", "opus", "sonnet", "haiku"})
+
+# Branch execution modes: "context" (Phase 0 — branches run in-context) or
+# "worktree" (Phase 1 — one isolated git worktree per branch).
+_VALID_BRANCHES_MODES: Final[frozenset[str]] = frozenset({"context", "worktree"})
 
 # Mapping from PQA_* env var name to TOML key.
 _ENV_MAP: Final[dict[str, str]] = {
@@ -56,6 +66,9 @@ _ENV_MAP: Final[dict[str, str]] = {
     "PQA_VERIFY_TESTS": "verify_tests",
     "PQA_MODEL": "model",
     "PQA_RUN_BUDGET_USD": "run_budget_usd",
+    "PQA_RUN_BUDGET_TOKENS": "run_budget_tokens",
+    "PQA_MAX_SPIRAL_DEPTH": "max_spiral_depth",
+    "PQA_BRANCHES_MODE": "branches_mode",
     "PQA_MEMORY_DB": "memory_db",
 }
 
@@ -68,7 +81,19 @@ class PQAConfig:
     verify_tests: bool
     model: str
     run_budget_usd: float
+    run_budget_tokens: int
+    max_spiral_depth: int
+    branches_mode: str
     memory_db: str
+
+    def resolved_model(self) -> str:
+        """The concrete dispatch/pricing model id for the configured alias.
+
+        This is THE translation point from operator preference to engine reality:
+        anything that prices or dispatches a model call derives its model id from
+        here (or from an explicit per-branch override), never from the raw alias.
+        """
+        return resolve_model(self.model)
 
 
 # ---------------------------------------------------------------------------
@@ -129,6 +154,45 @@ def _validate_run_budget_usd(value: object, *, origin: str) -> float:
     raise TypeError(
         f"{origin}: 'run_budget_usd' must be float, got {type(value).__name__}={value!r}",
     )
+
+
+def _validate_run_budget_tokens(value: object, *, origin: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(
+            f"{origin}: 'run_budget_tokens' must be int, got {type(value).__name__}={value!r}",
+        )
+    if value < 10_000:
+        raise ValueError(
+            f"{origin}: 'run_budget_tokens' must be >= 10000 "
+            f"(a full run cannot fit in less), got {value}",
+        )
+    return value
+
+
+def _validate_max_spiral_depth(value: object, *, origin: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(
+            f"{origin}: 'max_spiral_depth' must be int, got {type(value).__name__}={value!r}",
+        )
+    if not 0 <= value <= 5:
+        raise ValueError(
+            f"{origin}: 'max_spiral_depth' must be in [0, 5], got {value} "
+            "(unbounded spirals are how runs escape their budgets)",
+        )
+    return value
+
+
+def _validate_branches_mode(value: object, *, origin: str) -> str:
+    if not isinstance(value, str):
+        raise TypeError(
+            f"{origin}: 'branches_mode' must be str, got {type(value).__name__}={value!r}",
+        )
+    if value not in _VALID_BRANCHES_MODES:
+        raise ValueError(
+            f"{origin}: 'branches_mode' must be one of {sorted(_VALID_BRANCHES_MODES)}, "
+            f"got {value!r}",
+        )
+    return value
 
 
 _DANGEROUS_PATH_PREFIXES: Final[tuple[str, ...]] = (
@@ -206,6 +270,15 @@ def _coerce_env_run_budget_usd(raw: str) -> float:
         ) from cause
 
 
+def _coerce_env_int(raw: str, *, env_name: str) -> int:
+    try:
+        return int(raw)
+    except ValueError as cause:
+        raise ValueError(
+            f"{env_name} must be an integer, got {raw!r}",
+        ) from cause
+
+
 def _coerce_env_value(key: str, raw: str) -> int | bool | str | float:
     if key == "branches":
         return _coerce_env_branches(raw)
@@ -213,7 +286,11 @@ def _coerce_env_value(key: str, raw: str) -> int | bool | str | float:
         return _coerce_env_verify_tests(raw)
     if key == "run_budget_usd":
         return _coerce_env_run_budget_usd(raw)
-    # model and memory_db are already strings — no coercion.
+    if key == "run_budget_tokens":
+        return _coerce_env_int(raw, env_name="PQA_RUN_BUDGET_TOKENS")
+    if key == "max_spiral_depth":
+        return _coerce_env_int(raw, env_name="PQA_MAX_SPIRAL_DEPTH")
+    # model, branches_mode, and memory_db are already strings — no coercion.
     return raw
 
 
@@ -298,6 +375,12 @@ def _validate_field(key: str, value: object, *, origin: str) -> int | bool | str
         return _validate_model(value, origin=origin)
     if key == "run_budget_usd":
         return _validate_run_budget_usd(value, origin=origin)
+    if key == "run_budget_tokens":
+        return _validate_run_budget_tokens(value, origin=origin)
+    if key == "max_spiral_depth":
+        return _validate_max_spiral_depth(value, origin=origin)
+    if key == "branches_mode":
+        return _validate_branches_mode(value, origin=origin)
     if key == "memory_db":
         return _validate_memory_db(value, origin=origin)
     # Should never reach here — _reject_unknown_keys runs before us.
@@ -335,11 +418,19 @@ def load_config(path: str | Path) -> PQAConfig:
         # validator so the precedence layer cannot smuggle a bad type past us.
         resolved[key] = _validate_field(key, value, origin=f"env:{_env_name_for(key)}")
 
+    return _construct(resolved)
+
+
+def _construct(resolved: dict[str, int | bool | str | float]) -> PQAConfig:
+    """Build the frozen config from a fully validated key->value map."""
     return PQAConfig(
         branches=int(resolved["branches"]),
         verify_tests=bool(resolved["verify_tests"]),
         model=str(resolved["model"]),
         run_budget_usd=float(resolved["run_budget_usd"]),
+        run_budget_tokens=int(resolved["run_budget_tokens"]),
+        max_spiral_depth=int(resolved["max_spiral_depth"]),
+        branches_mode=str(resolved["branches_mode"]),
         memory_db=str(resolved["memory_db"]),
     )
 
@@ -361,13 +452,7 @@ def _build_defaults_with_env() -> PQAConfig:
     resolved: dict[str, int | bool | str | float] = dict(_DEFAULTS)
     for key, value in _collect_env_overrides().items():
         resolved[key] = _validate_field(key, value, origin=f"env:{_env_name_for(key)}")
-    return PQAConfig(
-        branches=int(resolved["branches"]),
-        verify_tests=bool(resolved["verify_tests"]),
-        model=str(resolved["model"]),
-        run_budget_usd=float(resolved["run_budget_usd"]),
-        memory_db=str(resolved["memory_db"]),
-    )
+    return _construct(resolved)
 
 
 _DEFAULT_CONFIG_PATH: Final[str] = "pqa-config.toml"

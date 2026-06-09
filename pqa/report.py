@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import re
 import sqlite3
 import time
 from dataclasses import dataclass
@@ -58,10 +59,24 @@ def _to_jsonable(obj: Any) -> Any:
     return obj
 
 
+# session_id becomes a directory name. Path separators or traversal tokens in it would
+# escape the artefact root — validate the shape, don't sanitise silently (a mangled id
+# breaks the report<->memory join keyed on session_id).
+_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+
+
 def write_report(report: RunReport, root: Path) -> RunArtefact:
     """Materialise a RunReport on disk. The session_id becomes the directory name; the
     output is overwriting (a re-run with the same session_id replaces prior content)
-    rather than incrementing, because session_id is supposed to be unique."""
+    rather than incrementing, because session_id is supposed to be unique.
+
+    Raises ValueError if session_id is not filesystem-safe (path separators,
+    traversal tokens, leading dots, or over 128 chars)."""
+    if not _SESSION_ID_RE.fullmatch(report.session_id):
+        raise ValueError(
+            f"session_id {report.session_id!r} is not filesystem-safe: must match "
+            f"{_SESSION_ID_RE.pattern} (no path separators, no leading dot)"
+        )
     artefact_dir = Path(root) / report.session_id
     branches_dir = artefact_dir / "branches"
     branches_dir.mkdir(parents=True, exist_ok=True)

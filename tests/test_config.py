@@ -227,9 +227,10 @@ def test_load_config_rejects_unknown_pqa_key(
 def test_load_config_partial_toml_uses_defaults_for_missing_keys(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """TOML with only `model` set → other fields are defaults from config/settings.py.
-    Partial config is not an error; only unknown keys are. Defaults from settings.py:
-    branches=3, verify_tests=False, model='opus', run_budget_usd=15.0,
+    """TOML with only `model` set → other fields are loader defaults.
+    Partial config is not an error; only unknown keys are. Defaults:
+    branches=3, verify_tests=False, model='opus', run_budget_usd=5.0,
+    run_budget_tokens=800_000, max_spiral_depth=1, branches_mode='context',
     memory_db='.claude/hooks/memory/pqa_memory.db'.
     """
     for var in (
@@ -237,6 +238,9 @@ def test_load_config_partial_toml_uses_defaults_for_missing_keys(
         "PQA_VERIFY_TESTS",
         "PQA_MODEL",
         "PQA_RUN_BUDGET_USD",
+        "PQA_RUN_BUDGET_TOKENS",
+        "PQA_MAX_SPIRAL_DEPTH",
+        "PQA_BRANCHES_MODE",
         "PQA_MEMORY_DB",
     ):
         monkeypatch.delenv(var, raising=False)
@@ -245,7 +249,10 @@ def test_load_config_partial_toml_uses_defaults_for_missing_keys(
     assert cfg.model == "haiku"
     assert cfg.branches == 3
     assert cfg.verify_tests is False
-    assert cfg.run_budget_usd == pytest.approx(15.0)
+    assert cfg.run_budget_usd == pytest.approx(5.0)
+    assert cfg.run_budget_tokens == 800_000
+    assert cfg.max_spiral_depth == 1
+    assert cfg.branches_mode == "context"
     assert cfg.memory_db == ".claude/hooks/memory/pqa_memory.db"
 
 
@@ -411,6 +418,9 @@ def test_load_or_defaults_with_missing_file_returns_defaults(
         "PQA_VERIFY_TESTS",
         "PQA_MODEL",
         "PQA_RUN_BUDGET_USD",
+        "PQA_RUN_BUDGET_TOKENS",
+        "PQA_MAX_SPIRAL_DEPTH",
+        "PQA_BRANCHES_MODE",
         "PQA_MEMORY_DB",
     ):
         monkeypatch.delenv(var, raising=False)
@@ -418,7 +428,10 @@ def test_load_or_defaults_with_missing_file_returns_defaults(
     assert cfg.branches == 3
     assert cfg.verify_tests is False
     assert cfg.model == "opus"
-    assert cfg.run_budget_usd == pytest.approx(15.0)
+    assert cfg.run_budget_usd == pytest.approx(5.0)
+    assert cfg.run_budget_tokens == 800_000
+    assert cfg.max_spiral_depth == 1
+    assert cfg.branches_mode == "context"
     assert cfg.memory_db == ".claude/hooks/memory/pqa_memory.db"
 
 

@@ -33,7 +33,13 @@ from pqa.cost import Budget, CostGovernor
 from pqa.divergence import DivergenceReport
 from pqa.frame import Frame, detect_disagreement, record_frame, update_resolved_by
 from pqa.memory import Failure, record_failure, record_precipitate
-from pqa.superposition import Branch, respawn_plan, spawn_prompts, validate_divergence
+from pqa.superposition import (
+    Branch,
+    RespawnPlan,
+    respawn_plan,
+    spawn_prompts,
+    validate_divergence,
+)
 
 
 @dataclass(frozen=True)
@@ -106,12 +112,17 @@ class RunReport:
     abort_reason: str | None
     started_at: int
     finished_at: int
+    # Context-management telemetry (roadmap §4): which memories were injected at
+    # frame-load, and how many tokens each stage held in the orchestrator. Tuples
+    # for the same structural-immutability reason as `branches` above.
+    memories_injected: tuple[str, ...] = ()
+    context_tokens_per_stage: tuple[tuple[str, int], ...] = ()
+    spiral_depth: int = 0
 
 
-# Default model used to price generator/adversary/verifier calls. The fake test callables
-# don't care — they pass token counts directly. Real callables can override per-call when
-# the orchestrator wraps them.
-_DEFAULT_MODEL = "claude-sonnet-4-6"
+# Model identity flows from the caller: generators carry it on Branch.model and the
+# adversary's model is an explicit `run()` parameter. There is deliberately no module
+# default — a hardcoded constant here is how recorded spend drifts from real dispatch.
 
 
 def _aborted_report(
@@ -171,6 +182,45 @@ def _generate_all(
     return branches, None
 
 
+def _respawn_similar(
+    branches: list[Branch],
+    pair: tuple[int, int],
+    generator: GeneratorFn,
+    governor: CostGovernor,
+    force_non_obvious: int | None,
+) -> tuple[list[Branch], DivergenceReport, RespawnPlan, str | None]:
+    """Honor a respawn-pair plan: regenerate one of the too-similar pair under a
+    stronger P_reframe, then re-validate. One retry only — if low variance persists,
+    proceed flagged rather than loop (a task that pulls every branch to one shape
+    should not buy unbounded regeneration). Never respawns the forced non-obvious
+    branch: it is the diversity guarantee."""
+    i, j = pair
+    victim = j if j != force_non_obvious else i
+    old = branches[victim]
+    reprompt = (
+        f"{old.prompt}\n\nP_reframe (STRONGER): your previous attempt converged with a "
+        "sibling branch. Refuse that shape entirely — change the topology, not the "
+        "wording. If the obvious answer is X, build the best non-X."
+    )
+    seed = Branch(id=old.id, prompt=reprompt, incremental=old.incremental, model=old.model)
+    populated, in_tok, out_tok = generator(seed)
+    governor.record(populated.id, populated.model, in_tok, out_tok)
+    if governor.should_abort():
+        report = validate_divergence(branches)
+        plan = RespawnPlan(action="abort", pair_indices=pair, reason="budget hit during respawn")
+        return branches, report, plan, "cost budget exceeded during respawn"
+    redone = [populated if b.id == old.id else b for b in branches]
+    divergence = validate_divergence(redone)
+    new_plan = respawn_plan(divergence)
+    if new_plan.action == "respawn-pair":
+        new_plan = RespawnPlan(
+            action="proceed",
+            pair_indices=new_plan.pair_indices,
+            reason="low variance persisted after one respawn; proceeding flagged",
+        )
+    return redone, divergence, new_plan, None
+
+
 def _resolved_view(survivor: Branch, branches: list[Branch]) -> str:
     """For the frame.resolved_by column: which side of the disagreement did the survivor
     align with? Phase 0 uses parity (even-indexed = research; odd-indexed = self-eval),
@@ -194,6 +244,10 @@ def run(
     baseline: Baseline | None = None,
     force_non_obvious: int | None = None,
     checkpoints: HumanCheckpoints | None = None,
+    adversary_model: str = "claude-opus-4-8",
+    injected_memory_ids: tuple[str, ...] = (),
+    spiral_depth: int = 0,
+    max_spiral_depth: int = 1,
 ) -> RunReport:
     """One PQA run, end-to-end.
 
@@ -203,6 +257,21 @@ def run(
     """
     started_at = int(time.time())
     governor = CostGovernor(budget)
+
+    # ---- 0. Spiral guard -----------------------------------------------------
+    # Spirals re-enter the full loop; without a depth cap the only brake is the
+    # budget, and a brake is not a steering wheel.
+    if spiral_depth > max_spiral_depth:
+        return _aborted_report(
+            task,
+            session_id,
+            f"spiral depth {spiral_depth} exceeds max_spiral_depth={max_spiral_depth}",
+            [],
+            [],
+            None,
+            governor,
+            started_at,
+        )
 
     # ---- 1. Frame collision ------------------------------------------------
     disagreement = detect_disagreement(research, selfeval)
@@ -237,6 +306,21 @@ def run(
     # ---- 3. Divergence gate ------------------------------------------------
     divergence = validate_divergence(branches)
     plan = respawn_plan(divergence)
+    if plan.action == "respawn-pair" and plan.pair_indices is not None:
+        branches, divergence, plan, respawn_abort = _respawn_similar(
+            branches, plan.pair_indices, generator, governor, force_non_obvious
+        )
+        if respawn_abort:
+            return _aborted_report(
+                task,
+                session_id,
+                respawn_abort,
+                branches,
+                [],
+                divergence,
+                governor,
+                started_at,
+            )
     if plan.action == "abort":
         return _aborted_report(
             task,
@@ -251,7 +335,7 @@ def run(
 
     # ---- 4. Adversary ------------------------------------------------------
     findings, adv_in, adv_out = adversary(branches)
-    governor.record("adversary", _DEFAULT_MODEL, adv_in, adv_out)
+    governor.record("adversary", adversary_model, adv_in, adv_out)
     if governor.should_abort():
         return _aborted_report(
             task,
@@ -372,6 +456,8 @@ def run(
         abort_reason=None,
         started_at=started_at,
         finished_at=finished_at,
+        memories_injected=injected_memory_ids,
+        spiral_depth=spiral_depth,
     )
 
 

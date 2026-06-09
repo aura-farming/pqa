@@ -17,24 +17,65 @@ from typing import Literal
 
 Status = Literal["ok", "warn", "abort"]
 
-# Per-million-token pricing (USD), standard tier. Keep current with vendor pricing.
+# Per-million-token pricing (USD), standard tier, from platform.claude.com/docs pricing.
+# PRICING_AS_OF pins the date these numbers were verified against the vendor table; the
+# test suite asserts the table matches these published rates so drift is caught in CI,
+# not in a user's budget gate.
+PRICING_AS_OF = "2026-06-10"
+
 MODEL_PRICING: dict[str, tuple[float, float]] = {
-    "claude-opus-4-7": (15.0, 75.0),
+    "claude-fable-5": (10.0, 50.0),
+    "claude-opus-4-8": (5.0, 25.0),
+    "claude-opus-4-7": (5.0, 25.0),
     "claude-sonnet-4-6": (3.0, 15.0),
-    "claude-haiku-4-5": (0.80, 4.0),
+    "claude-haiku-4-5": (1.0, 5.0),
 }
+
+# Operator-facing aliases (what `pqa-config.toml` / `PQA_MODEL` accept) -> concrete
+# pricing/dispatch keys. This is the single translation point between the config's
+# declared preference and everything that prices or dispatches a model call.
+MODEL_ALIASES: dict[str, str] = {
+    "fable": "claude-fable-5",
+    "opus": "claude-opus-4-8",
+    "sonnet": "claude-sonnet-4-6",
+    "haiku": "claude-haiku-4-5",
+}
+
+
+def resolve_model(name: str) -> str:
+    """Resolve an alias or concrete model id to a MODEL_PRICING key.
+
+    Accepts either an operator alias (``opus``) or a concrete id
+    (``claude-opus-4-8``). Raises KeyError on anything else — a typo here is
+    a real bug, not something to silently default.
+    """
+    concrete = MODEL_ALIASES.get(name, name)
+    if concrete not in MODEL_PRICING:
+        known = sorted(MODEL_ALIASES) + sorted(MODEL_PRICING)
+        raise KeyError(f"unknown model {name!r}; known: {', '.join(known)}")
+    return concrete
 
 
 @dataclass(frozen=True)
 class Budget:
+    """Run budget. ``max_tokens`` is the primary ledger — PQA runs on a Claude Code
+    subscription where USD is synthetic but tokens, rate limits, and context are real.
+    ``max_usd`` stays as the secondary cap and the display currency for API-mode users.
+    Either cap tripping aborts the run."""
+
     max_usd: float
     warn_at: float = 0.8
+    max_tokens: int | None = None
 
     def __post_init__(self) -> None:
         if self.max_usd <= 0:
             raise ValueError(f"max_usd must be positive, got {self.max_usd}")
         if not 0 < self.warn_at < 1:
             raise ValueError(f"warn_at must be in (0, 1), got {self.warn_at}")
+        if self.max_tokens is not None and (
+            isinstance(self.max_tokens, bool) or self.max_tokens <= 0
+        ):
+            raise ValueError(f"max_tokens must be a positive int or None, got {self.max_tokens!r}")
 
 
 @dataclass(frozen=True)
@@ -45,9 +86,9 @@ class Spend:
 
 
 def cost_for(model: str, input_tokens: int, output_tokens: int) -> float:
-    """Cost in USD for one model call. Raises KeyError on unknown models — a typo here is
-    a real bug, not something to silently default."""
-    in_per_mil, out_per_mil = MODEL_PRICING[model]
+    """Cost in USD for one model call. Accepts aliases or concrete ids. Raises KeyError
+    on unknown models — a typo here is a real bug, not something to silently default."""
+    in_per_mil, out_per_mil = MODEL_PRICING[resolve_model(model)]
     return (input_tokens * in_per_mil + output_tokens * out_per_mil) / 1_000_000
 
 
@@ -90,15 +131,22 @@ class CostGovernor:
             output_tokens=sum(s.output_tokens for s in spends),
             cost_usd=sum(s.cost_usd for s in spends),
         )
-        status = self._status_from(total.cost_usd)
+        status = self._status_from(total.cost_usd, total.input_tokens + total.output_tokens)
         return total, per_branch_copy, status
 
-    def _status_from(self, spent: float) -> Status:
-        """Pure function: classify a known cost against the budget. No lock needed
-        because the input is already a snapshot."""
-        if spent >= self._budget.max_usd:
+    def _status_from(self, spent_usd: float, spent_tokens: int) -> Status:
+        """Pure function: classify known spend against the budget on BOTH axes.
+        Tokens are the primary ledger (subscription runs have no marginal USD cost);
+        USD remains the secondary cap. Either axis tripping aborts. No lock needed
+        because the inputs are already a snapshot."""
+        max_tok = self._budget.max_tokens
+        if spent_usd >= self._budget.max_usd:
             return "abort"
-        if spent >= self._budget.max_usd * self._budget.warn_at:
+        if max_tok is not None and spent_tokens >= max_tok:
+            return "abort"
+        if spent_usd >= self._budget.max_usd * self._budget.warn_at:
+            return "warn"
+        if max_tok is not None and spent_tokens >= max_tok * self._budget.warn_at:
             return "warn"
         return "ok"
 
@@ -135,11 +183,24 @@ class CostGovernor:
             )
         projected_cost = cost_for(model, projected_input_tokens, projected_output_tokens)
         total, _per_branch, _status = self._snapshot_under_lock()
-        return self._status_from(total.cost_usd + projected_cost) == "abort"
+        projected_tokens = (
+            total.input_tokens
+            + total.output_tokens
+            + projected_input_tokens
+            + projected_output_tokens
+        )
+        return self._status_from(total.cost_usd + projected_cost, projected_tokens) == "abort"
 
     def remaining_usd(self) -> float:
         total, _per_branch, _status = self._snapshot_under_lock()
         return max(0.0, self._budget.max_usd - total.cost_usd)
+
+    def remaining_tokens(self) -> int | None:
+        """Tokens left under the token cap, or None when no token cap is set."""
+        if self._budget.max_tokens is None:
+            return None
+        total, _per_branch, _status = self._snapshot_under_lock()
+        return max(0, self._budget.max_tokens - total.input_tokens - total.output_tokens)
 
     def report(self) -> str:
         """Single-snapshot report so the displayed status, total, remaining, and
@@ -153,8 +214,11 @@ class CostGovernor:
             f"spent: ${total.cost_usd:.4f} of ${self._budget.max_usd:.2f}",
             f"remaining: ${remaining:.4f}",
             f"tokens: in={total.input_tokens:,}, out={total.output_tokens:,}",
-            "branches:",
         ]
+        if self._budget.max_tokens is not None:
+            used = total.input_tokens + total.output_tokens
+            lines.append(f"token budget: {used:,} of {self._budget.max_tokens:,}")
+        lines.append("branches:")
         for branch_id, spend in sorted(per_branch_copy.items()):
             lines.append(
                 f"  {branch_id}: ${spend.cost_usd:.4f} "
