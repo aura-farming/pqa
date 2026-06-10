@@ -18,20 +18,34 @@ Idempotence is your defining property: running you twice must be safe.
 ## Protocol
 
 1. **Confirm the survivor.** Read `.pqa/state.json` (the run journal) and the collapse
-   artifact. No recorded survivor → do nothing, report "nothing to reconcile", exit.
+   artifact. No recorded survivor → do nothing, report "nothing to reconcile", exit —
+   but FIRST sweep for strays: every run id in the state file's `worktrees` registry
+   with no live loop gets `reconcile(run_id, None)` (zero-orphan rule).
 2. **Apply.**
    - Context mode (branches under `.pqa/branches/bN/`): copy the survivor's files into
      the working tree, smallest-diff first. Never copy `notes.md` or scratch files.
-   - Worktree mode (branches on `pqa/<run>-bN` git branches): `scripts/reconcile.sh`
-     owns the merge. It already aborts on conflict (`git merge --abort`, non-zero exit)
-     and preserves the survivor branch — do not re-implement it inline.
+   - Worktree mode (branches on `pqa/<run>-bN` git branches): the engine owns the
+     merge — do not re-implement it inline:
+
+     ```bash
+     python3 <<'PY'
+     from pqa.worktrees import reconcile
+     r = reconcile("${RUN_ID}", "${SURVIVOR_BRANCH}")
+     print(f"merged={r.merged} merge_failed={r.merge_failed} "
+           f"pruned={len(r.removed_trees)} trees / {len(r.deleted_branches)} branches")
+     PY
+     ```
+
+     It merges `--no-ff`, aborts on conflict (`merge_failed=True`, survivor branch
+     preserved for a manual merge), always prunes the run's trees+branches, and clears
+     the registry. `scripts/reconcile.sh` is the same engine via CLI.
 3. **Re-verify in place.** Run the project's real test/type/lint suite once against the
    merged tree. A survivor that passes in its branch but fails after merge is a FAILED
    reconcile: revert the application, report loudly, and record the failure (approach
    `reconcile:<survivor_id>`, death reason = the verbatim first failure).
-4. **Clean up.** Remove the dead `.pqa/branches/bN/` directories; in worktree mode let
-   the script prune `pqa/*` branches and worktrees. The survivor's artifacts stay until
-   the operator commits.
+4. **Clean up.** Remove the dead `.pqa/branches/bN/` directories; in worktree mode the
+   engine call above already pruned `pqa/*` branches and worktrees. The survivor's
+   artifacts stay until the operator commits.
 5. **Report.** One paragraph: what was applied (files), the re-verify result, what was
    pruned, and what the operator must still do (review + commit — you never commit or
    push on their behalf).

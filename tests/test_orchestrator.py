@@ -943,3 +943,94 @@ def test_run_reports_injected_instincts_and_agreement(conn: sqlite3.Connection):
     assert set(report.instincts_injected) <= set(report.memories_injected)
     agreement = dict(report.instinct_agreement)
     assert agreement[report.instincts_injected[0]] is True
+
+
+# ---------------------------------------------------------------------------
+# Worktree mode (roadmap §9): run() threads workdirs into the generator seeds
+
+
+def test_run_threads_workdirs_into_generator_seeds(conn: sqlite3.Connection):
+    seeds: list[Branch] = []
+    outputs = _divergent_outputs()
+
+    def generator(branch: Branch) -> tuple[Branch, int, int]:
+        seeds.append(branch)
+        populated = Branch(
+            id=branch.id,
+            prompt=branch.prompt,
+            output=outputs.get(branch.id, "x"),
+            incremental=branch.incremental,
+            model=branch.model,
+            workdir=branch.workdir,
+        )
+        return populated, 100, 50
+
+    report = run(
+        task="t",
+        session_id="s",
+        base_prompt="x",
+        research=_research(),
+        selfeval=_selfeval(),
+        generator=generator,
+        adversary=_make_adversary([]),
+        verifier=_make_verifier(
+            {
+                "b0": VerifyResult(has_tests=True, verified=True, coverage=80.0),
+                "b1": VerifyResult(has_tests=True, verified=False, coverage=None),
+            }
+        ),
+        budget=Budget(max_usd=10.0),
+        conn=conn,
+        n_branches=2,
+        workdirs=[".pqa_worktrees/s-b1", ".pqa_worktrees/s-b2"],
+    )
+    assert [b.workdir for b in seeds] == [".pqa_worktrees/s-b1", ".pqa_worktrees/s-b2"]
+    assert [b.workdir for b in report.branches] == [
+        ".pqa_worktrees/s-b1",
+        ".pqa_worktrees/s-b2",
+    ]
+
+
+def test_run_workdirs_length_mismatch_raises(conn: sqlite3.Connection):
+    with pytest.raises(ValueError, match="workdirs"):
+        run(
+            task="t",
+            session_id="s",
+            base_prompt="x",
+            research=_research(),
+            selfeval=_selfeval(),
+            generator=_make_generator(_divergent_outputs()),
+            adversary=_make_adversary([]),
+            verifier=_make_verifier({}),
+            budget=Budget(max_usd=10.0),
+            conn=conn,
+            n_branches=2,
+            workdirs=[".pqa_worktrees/s-b1"],
+        )
+
+
+def test_respawn_seed_preserves_workdir():
+    """A respawned branch reuses its worktree: the P_reframe seed must carry the
+    victim's workdir so the regenerated solution lands in the same isolated tree."""
+    from pqa.cost import CostGovernor
+    from pqa.orchestrator import _respawn_similar
+
+    governor = CostGovernor(Budget(max_usd=10.0))
+    branches = [
+        Branch(id="b0", prompt="p0", output="def f():\n    return 1\n", workdir="w0"),
+        Branch(id="b1", prompt="p1", output="def g():\n    return 1\n", workdir="w1"),
+    ]
+    captured: list[Branch] = []
+
+    def generator(branch: Branch) -> tuple[Branch, int, int]:
+        captured.append(branch)
+        populated = Branch(
+            id=branch.id,
+            prompt=branch.prompt,
+            output="class Z:\n    pass\n",
+            workdir=branch.workdir,
+        )
+        return populated, 10, 5
+
+    _respawn_similar(branches, (0, 1), generator, governor, force_non_obvious=None)
+    assert captured[0].workdir == "w1"  # victim b1 regenerates into its own tree

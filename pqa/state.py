@@ -159,7 +159,21 @@ def _write_atomic(p: Path, journal: RunJournal) -> None:
         "task": journal.task,
         "stages": [asdict(record) for record in journal.stages],
     }
+    # The file is shared with the worktree registry (pqa.worktrees): preserve any
+    # foreign top-level keys so journaling a stage never clobbers the registry. A
+    # corrupt predecessor is superseded wholesale (see record_stage docstring).
+    merged = {**_foreign_keys(p), **payload}
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(f".tmp.{os.getpid()}")
-    tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    tmp.write_text(json.dumps(merged, indent=2), encoding="utf-8")
     tmp.replace(p)
+
+
+def _foreign_keys(p: Path) -> dict[str, Any]:
+    if not p.exists():
+        return {}
+    try:
+        raw = json.loads(p.read_text(encoding="utf-8"))
+    except OSError, json.JSONDecodeError:
+        return {}
+    return cast(dict[str, Any], raw) if isinstance(raw, dict) else {}

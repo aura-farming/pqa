@@ -111,13 +111,34 @@ mkdir -p .pqa/branches .pqa/artefacts
 python3 <<'PY'
 from pqa.config import load_or_defaults
 cfg = load_or_defaults()
-print(cfg.branches, cfg.run_budget_usd, cfg.run_budget_tokens, cfg.memory_db, cfg.resolved_model())
+print(cfg.branches, cfg.run_budget_usd, cfg.run_budget_tokens, cfg.memory_db,
+      cfg.resolved_model(), cfg.branches_mode)
 PY
 ```
 
 Budget = `Budget(max_usd=cfg.run_budget_usd, max_tokens=cfg.run_budget_tokens)`.
 Track spend as JSON records under `.pqa/spend/` and consolidate with `CostGovernor`
 before every dispatch (pre-flight) and after every return (actual).
+
+**Worktree mode** (`cfg.branches_mode == "worktree"`, git repos only): recover any
+strays a killed run left behind, then spawn this run's isolated trees — the engine
+owns the lifecycle (write-ahead registry in `.pqa/state.json`, rollback on partial
+failure):
+
+```bash
+python3 <<'PY'
+from pqa.config import load_or_defaults
+from pqa.worktrees import reconcile, registered, spawn
+cfg = load_or_defaults()
+for stray_run in registered():      # zero-orphan rule: prune crashed runs
+    reconcile(stray_run, None)      # before any new spend
+trees = spawn("${SESSION_ID}", cfg.branches)
+print("\n".join(t.path for t in trees))
+PY
+```
+
+Branch `bI` works in `trees[I].path` (an isolated checkout on `pqa/${SESSION_ID}-bI`);
+pass the same paths as `workdirs=` when corroborating with `pqa.orchestrator.run`.
 
 ### 1. Frame (P-collapse) — with prior art
 
@@ -165,6 +186,11 @@ Return ONLY this digest, nothing else:
 Hard cap: 150 tokens. Your return value is parsed, not read by a human.
 ```
 
+Worktree mode: the write target becomes the branch's worktree (`Write your complete
+solution into ${WORKTREE_PATH}/ — an isolated checkout on its own pqa/* branch —
+and commit your work there`); digest contract unchanged. A respawned branch reuses
+its own worktree.
+
 Validate divergence on the **digests' topology axes plus on-disk diffs** via
 `pqa.superposition.validate_divergence` / `respawn_plan`; honor `respawn-pair`
 exactly once (stronger P-reframe), then proceed flagged. Journal `superpose`
@@ -208,7 +234,9 @@ context, reading its own findings) before findings are final. Journal `collide`.
 `pqa-verifier` per branch path: run the real tests/types/lint inside the branch.
 Returns `{has_tests, verified, coverage}`. This is the only signal in the loop from
 outside the model's distribution. No test suite → the result is **UNVERIFIED** and
-the final report must say so. Journal `verify`.
+the final report must say so. Journal `verify`. Worktree mode: each verifier runs
+**inside its branch's worktree** — true isolation; parallel verifiers cannot race
+on one shared tree.
 
 ### 6. Collapse (P-relativize) — judge sees structure, never code
 
@@ -238,6 +266,12 @@ PY
 
 Journal `precipitate`, then `report`. Return the artifact path and the one-line
 precipitate name. Unnamed insight dissolves.
+
+Worktree mode: finish by dispatching `pqa-reconciler` — it merges the survivor's
+`pqa/${SESSION_ID}-bN` branch `--no-ff` via `pqa.worktrees.reconcile` and prunes
+every tree+branch for the run. `merge_failed=True` is reported LOUDLY (survivor
+branch preserved for a manual merge; failure row `reconcile:<survivor>`), never
+smoothed over. Zero orphans is part of the run's definition of done.
 
 ## Cost discipline
 

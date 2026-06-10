@@ -9,9 +9,11 @@ Ties every Phase-0 module together into one runnable pass:
 
 Cost-governed throughout: every model call records into a CostGovernor, and the loop
 aborts cleanly (returning a partial RunReport) the moment the budget cap is crossed.
-Phase 0 runs branches sequentially in-context (no worktrees). Phase 2 will swap that
-for parallel worktree spawning behind the same Branch interface — this function does
-not change when that happens.
+Branches run sequentially in-context by default. In worktree mode the caller spawns
+isolated trees via pqa.worktrees and passes their paths as `workdirs`; each generator
+seed then carries its tree in Branch.workdir, and the verifier callable is expected
+to run the real suite inside that tree (true isolation). The loop itself is the same
+either way — the engine never shells out to git.
 
 Generators, adversaries, and verifiers are external callables (subagent / model / mock)
 because the orchestrator itself must stay deterministic and testable. Each callable
@@ -23,7 +25,7 @@ from __future__ import annotations
 
 import sqlite3
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from pqa.baseline import Baseline, Comparison, compare
@@ -179,9 +181,11 @@ def _generate_all(
     generator: GeneratorFn,
     governor: CostGovernor,
     force_non_obvious: int | None,
+    workdirs: Sequence[str] | None = None,
 ) -> tuple[list[Branch], str | None]:
     """Spawn N prompts and generate each branch sequentially. Returns the branches plus
-    an abort reason string if the cost cap tripped mid-generation."""
+    an abort reason string if the cost cap tripped mid-generation. In worktree mode
+    each seed carries its isolated tree path so the generator writes real code there."""
     disagreement = detect_disagreement(research, selfeval)
     prompts = spawn_prompts(
         n,
@@ -191,7 +195,12 @@ def _generate_all(
     )
     branches: list[Branch] = []
     for i, prompt in enumerate(prompts):
-        seed = Branch(id=f"b{i}", prompt=prompt, incremental=(i != force_non_obvious))
+        seed = Branch(
+            id=f"b{i}",
+            prompt=prompt,
+            incremental=(i != force_non_obvious),
+            workdir=None if workdirs is None else workdirs[i],
+        )
         populated, in_tok, out_tok = generator(seed)
         governor.record(populated.id, populated.model, in_tok, out_tok)
         branches.append(populated)
@@ -220,7 +229,14 @@ def _respawn_similar(
         "sibling branch. Refuse that shape entirely — change the topology, not the "
         "wording. If the obvious answer is X, build the best non-X."
     )
-    seed = Branch(id=old.id, prompt=reprompt, incremental=old.incremental, model=old.model)
+    # The respawned branch reuses its worktree: same isolated tree, new topology.
+    seed = Branch(
+        id=old.id,
+        prompt=reprompt,
+        incremental=old.incremental,
+        model=old.model,
+        workdir=old.workdir,
+    )
     populated, in_tok, out_tok = generator(seed)
     governor.record(populated.id, populated.model, in_tok, out_tok)
     if governor.should_abort():
@@ -267,6 +283,7 @@ def run(
     spiral_depth: int = 0,
     max_spiral_depth: int = 1,
     prior_art_token_budget: int = 400,
+    workdirs: Sequence[str] | None = None,
 ) -> RunReport:
     """One PQA run, end-to-end.
 
@@ -278,7 +295,16 @@ def run(
     precipitates are injected into the generation prompt under a hard token budget
     (`prior_art_token_budget`, 0 disables), and every injected memory id is reported in
     `memories_injected` alongside any ids the caller injected out-of-band.
+
+    `workdirs` (worktree mode, roadmap §9): one isolated tree path per branch, spawned
+    by the caller via pqa.worktrees and threaded onto each generator seed's
+    Branch.workdir. The caller's generator/verifier callables are responsible for
+    writing and verifying inside those trees.
     """
+    if workdirs is not None and len(workdirs) != n_branches:
+        raise ValueError(
+            f"workdirs must have exactly n_branches={n_branches} entries, got {len(workdirs)}"
+        )
     started_at = int(time.time())
     governor = CostGovernor(budget)
 
@@ -331,7 +357,14 @@ def run(
 
     # ---- 2. Spawn + generate ----------------------------------------------
     branches, abort = _generate_all(
-        n_branches, prompt, research, selfeval, generator, governor, force_non_obvious
+        n_branches,
+        prompt,
+        research,
+        selfeval,
+        generator,
+        governor,
+        force_non_obvious,
+        workdirs,
     )
     if abort:
         return _aborted_report(
