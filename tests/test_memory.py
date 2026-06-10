@@ -9,6 +9,7 @@ from pqa.cost import estimate_tokens
 from pqa.memory import (
     Failure,
     PriorArt,
+    backfill_signal_outcomes,
     connect,
     fts5_available,
     prior_art,
@@ -17,6 +18,7 @@ from pqa.memory import (
     record_precipitate,
     record_signal,
     search_failures,
+    search_instincts,
     search_precipitates,
     update_signal_outcome,
 )
@@ -275,3 +277,73 @@ def test_prior_art_respects_token_budget(conn: sqlite3.Connection):
 def test_prior_art_zero_budget_is_empty(conn: sqlite3.Connection):
     record_failure(conn, "s", "rate limiter", Failure("a", "b"))
     assert prior_art(conn, "rate limiter", max_tokens=0) == PriorArt(ids=(), text="")
+
+
+# ---------------------------------------------------------------------------
+# Phase 3c: signal outcome back-fill + instinct retrieval
+
+
+def test_backfill_signal_outcomes_updates_only_pending(conn: sqlite3.Connection):
+    done = record_signal(conn, "s9", "high", "already settled", branch="b0")
+    update_signal_outcome(conn, done, won=True)
+    record_signal(conn, "s9", "medium", "still open", branch="b1")
+    assert backfill_signal_outcomes(conn, "s9", won=False, verified=False) == 1
+    assert conn.execute("SELECT won FROM signals WHERE id=?", (done,)).fetchone()[0] == 1
+    pending = conn.execute(
+        "SELECT count(*) FROM signals WHERE session_id='s9' AND outcome_at IS NULL"
+    ).fetchone()[0]
+    assert pending == 0
+
+
+def test_backfill_signal_outcomes_filters_by_branch(conn: sqlite3.Connection):
+    record_signal(conn, "s10", "high", "a", branch="b0")
+    record_signal(conn, "s10", "high", "b", branch="b1")
+    assert backfill_signal_outcomes(conn, "s10", branch="b1", won=True) == 1
+    untouched = conn.execute(
+        "SELECT outcome_at FROM signals WHERE session_id='s10' AND branch='b0'"
+    ).fetchone()[0]
+    assert untouched is None
+
+
+def test_backfill_signal_outcomes_requires_an_outcome(conn: sqlite3.Connection):
+    with pytest.raises(ValueError):
+        backfill_signal_outcomes(conn, "s11")
+
+
+def test_search_instincts_ranks_relevance_then_confidence(conn: sqlite3.Connection):
+    conn.execute(
+        "INSERT INTO instincts(name, statement, confidence, evidence_n, origin, created_at) "
+        "VALUES('queue-wins', 'backpressure queue absorbs ingest bursts', 0.6, 3, 'local', 0)"
+    )
+    conn.execute(
+        "INSERT INTO instincts(name, statement, confidence, evidence_n, origin, created_at) "
+        "VALUES('also-queues', 'queue ingest with backpressure and absorb bursts', "
+        "0.9, 5, 'local', 0)"
+    )
+    conn.execute(
+        "INSERT INTO instincts(name, statement, confidence, evidence_n, origin, created_at) "
+        "VALUES('unrelated', 'denormalize the read model', 0.99, 9, 'local', 0)"
+    )
+    conn.commit()
+    hits = search_instincts(conn, "ingest queue backpressure bursts", limit=2)
+    assert [h.name for h in hits] == ["also-queues", "queue-wins"]  # relevance tie → confidence
+    assert all(h.confidence > 0 for h in hits)
+
+
+def test_prior_art_cites_instincts_between_failures_and_precipitates(conn: sqlite3.Connection):
+    record_failure(conn, "s", "rate limiter", Failure("fixed-window", "verifier: boundary"))
+    conn.execute(
+        "INSERT INTO instincts(name, statement, confidence, evidence_n, origin, created_at) "
+        "VALUES('queue-wins', 'rate limiter queues beat windows', 0.7, 3, 'local', 0)"
+    )
+    conn.commit()
+    record_precipitate(conn, "s", "rate limiter", "queue won", "absorbed the burst")
+    art = prior_art(conn, "rate limiter")
+    assert any(i.startswith("failure:") for i in art.ids)
+    assert any(i.startswith("instinct:") for i in art.ids)
+    positions = (
+        art.text.index("[failure:"),
+        art.text.index("[instinct:"),
+        art.text.index("[precipitate:"),
+    )
+    assert positions == tuple(sorted(positions))

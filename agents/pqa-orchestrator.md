@@ -227,8 +227,12 @@ from pqa.memory import Failure, connect, record_failure, record_precipitate
 from pqa.frame import update_resolved_by
 from pqa.report import record_cost_run, write_report
 # record precipitate (one-line name), losers as failures with verbatim death
-# reasons, frame.resolved_by; then write_report(run_report, root=".pqa/artefacts")
-# with memories_injected and context_tokens_per_stage filled in.
+# reasons, frame.resolved_by; back-fill conviction outcomes for every flagged
+# branch via pqa.memory.backfill_signal_outcomes(conn, "${SESSION_ID}",
+#   branch="bN", survived=..., verified=..., won=...) — hook-captured signals
+# must never stay pending after a finished run; then
+# write_report(run_report, root=".pqa/artefacts") with memories_injected and
+# context_tokens_per_stage filled in.
 PY
 ```
 

@@ -28,11 +28,22 @@ from dataclasses import dataclass
 
 from pqa.baseline import Baseline, Comparison, compare
 from pqa.collapse import BranchResult, CollapseOutcome, select_survivor
-from pqa.collision import Finding, score_all
+from pqa.collision import CollisionScore, Finding, score_all
 from pqa.cost import Budget, CostGovernor
 from pqa.divergence import DivergenceReport
 from pqa.frame import Frame, detect_disagreement, record_frame, update_resolved_by
-from pqa.memory import Failure, prior_art, record_failure, record_precipitate
+from pqa.instincts import agrees
+from pqa.memory import (
+    SIGNAL_LEVELS,
+    Failure,
+    instinct_statement,
+    prior_art,
+    record_failure,
+    record_precipitate,
+    record_signal,
+    update_signal_outcome,
+)
+from pqa.signals import parse_conviction
 from pqa.superposition import (
     Branch,
     RespawnPlan,
@@ -118,6 +129,10 @@ class RunReport:
     memories_injected: tuple[str, ...] = ()
     context_tokens_per_stage: tuple[tuple[str, int], ...] = ()
     spiral_depth: int = 0
+    # Roadmap §7.4: which instincts were injected at frame-load, and whether the
+    # winner agreed with each — instinct hit-rate accrues from these pairs.
+    instincts_injected: tuple[str, ...] = ()
+    instinct_agreement: tuple[tuple[str, bool], ...] = ()
 
 
 # Model identity flows from the caller: generators carry it on Branch.model and the
@@ -288,6 +303,7 @@ def run(
     # report can name what influenced the run.
     art = prior_art(conn, task, max_tokens=prior_art_token_budget)
     memories = injected_memory_ids + art.ids
+    instinct_ids = tuple(i for i in art.ids if i.startswith("instinct:"))
     prompt = f"{base_prompt}\n\n{art.text}" if art.ids else base_prompt
 
     disagreement = detect_disagreement(research, selfeval)
@@ -463,6 +479,10 @@ def run(
                 ),
             )
 
+    # ---- 9. Conviction outcomes + instinct hit-rate (roadmap §7) ----------
+    survivor_name = None if outcome.survivor is None else outcome.survivor.name
+    _record_signal_outcomes(conn, session_id, branches, scores, verify_results, survivor_name)
+
     finished_at = int(time.time())
     return RunReport(
         task=task,
@@ -481,6 +501,8 @@ def run(
         finished_at=finished_at,
         memories_injected=memories,
         spiral_depth=spiral_depth,
+        instincts_injected=instinct_ids,
+        instinct_agreement=_instinct_agreement(conn, instinct_ids, survivor_branch),
     )
 
 
@@ -497,3 +519,47 @@ def _death_reason(br: BranchResult, findings: list[Finding]) -> str:
     if not br.verified:
         return "failed verification"
     return "outranked by survivor"
+
+
+def _record_signal_outcomes(
+    conn: sqlite3.Connection,
+    session_id: str,
+    branches: list[Branch],
+    scores: dict[str, CollisionScore],
+    verify_results: dict[str, VerifyResult],
+    survivor_name: str | None,
+) -> None:
+    """Roadmap §7.1: every conviction-flagged branch leaves a signal row WITH its
+    outcome — survived the collision, passed the verifier, won the collapse. A
+    finished run must never leave its own signals pending."""
+    for b in branches:
+        conviction = parse_conviction(b.output)
+        level = conviction.level if conviction else b.conviction
+        if level not in SIGNAL_LEVELS:
+            continue
+        basis = conviction.basis if conviction else "(basis not stated)"
+        signal_id = record_signal(conn, session_id, level, basis, branch=b.id)
+        update_signal_outcome(
+            conn,
+            signal_id,
+            survived=scores[b.id].survives,
+            verified=verify_results[b.id].verified,
+            won=(b.id == survivor_name),
+        )
+
+
+def _instinct_agreement(
+    conn: sqlite3.Connection,
+    instinct_ids: tuple[str, ...],
+    survivor: Branch | None,
+) -> tuple[tuple[str, bool], ...]:
+    """Instinct hit-rate telemetry: did the winner agree with each injected instinct?
+    No survivor → everything counts as disagreed."""
+    pairs: list[tuple[str, bool]] = []
+    for memory_id in instinct_ids:
+        statement = instinct_statement(conn, int(memory_id.split(":", 1)[1]))
+        agreed = (
+            survivor is not None and statement is not None and agrees(statement, survivor.output)
+        )
+        pairs.append((memory_id, agreed))
+    return tuple(pairs)

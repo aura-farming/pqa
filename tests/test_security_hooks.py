@@ -620,3 +620,31 @@ def test_precipitate_capture_truncates_oversized_strings(tmp_path: Path) -> None
     name, rationale = rows[0]
     assert len(name) <= 200, f"name length {len(name)} exceeded 200 cap"
     assert len(rationale) <= 1_000, f"rationale length {len(rationale)} exceeded 1000 cap"
+
+
+def test_precipitate_capture_records_branch_id_from_digest(tmp_path: Path) -> None:
+    """Phase 3c: the digest's branch_id rides along with the conviction signal so the
+    engine can back-fill outcomes per branch after collapse."""
+    import sqlite3
+
+    from pqa.memory import connect
+
+    db_path = tmp_path / ".claude" / "hooks" / "memory" / "pqa_memory.db"
+    connect(db_path).close()  # current schema, including signals.branch
+
+    transcript = tmp_path / ".claude" / "transcript.jsonl"
+    digest = (
+        '{"branch_id": "b2", "topology_axis": "x"} '
+        "conviction: medium, basis: structural divergence held"
+    )
+    transcript.write_text(json.dumps({"message": {"role": "assistant", "content": digest}}) + "\n")
+
+    exit_code, _ = _run_hook(
+        "precipitate_capture.py",
+        {"cwd": str(tmp_path), "session_id": "s", "transcript_path": str(transcript)},
+    )
+    assert exit_code == 0
+    conn = sqlite3.connect(str(db_path))
+    level, branch = conn.execute("SELECT level, branch FROM signals").fetchone()
+    conn.close()
+    assert (level, branch) == ("medium", "b2")

@@ -17,23 +17,19 @@ The empirical answer to "do hunches mean anything?":
 ```bash
 python3 <<'PY'
 from pqa.config import load_or_defaults
+from pqa.instincts import calibration
 from pqa.memory import connect
-conn = connect(load_or_defaults().memory_db)
-rows = conn.execute("""
-    SELECT coalesce(level,'none')              AS conviction,
-           count(*)                            AS signals,
-           sum(coalesce(won,0))                AS wins,
-           round(avg(coalesce(won,0)), 3)      AS p_win,
-           sum(CASE WHEN won IS NULL THEN 1 END) AS no_outcome
-    FROM signals GROUP BY level ORDER BY p_win DESC""").fetchall()
-for r in rows:
-    print(r)
+for r in calibration(connect(load_or_defaults().memory_db)):
+    print(f"{r.level}: P(win)={r.p_win} ({r.wins}/{r.n}, {r.pending} pending)")
 PY
 ```
 
-Report `P(win | conviction=high)` against `P(win | none)`. The gap (or its absence) is
-the most novel number this system produces. `no_outcome > 0` means back-fill is broken —
-flag that as a harness defect before drawing any conclusion.
+Report `P(win | conviction=high)` against the `base` row (the all-branches win rate;
+budget-aborted deaths are excluded from its denominator). The gap, or its absence, is
+the most novel number this system produces. `pending > 0` on finished runs means
+outcome back-fill is broken — flag that as a harness defect before drawing conclusions.
+Also report instinct hit-rate: `RunReport.instinct_agreement` pairs accumulate in the
+artefact reports — how often did the winner agree with an injected instinct?
 
 ## Blind-spot scan
 

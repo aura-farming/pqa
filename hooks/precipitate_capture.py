@@ -31,6 +31,9 @@ from hook_common import is_disabled
 # than imported — change both together.
 CONVICTION = re.compile(r"conviction:\s*(high|medium|low)\s*,\s*basis:\s*(.+)", re.IGNORECASE)
 PRECIPITATE = re.compile(r"PRECIPITATE:\s*(.+?)\s*::\s*(.+)", re.IGNORECASE)
+# The branch digest carries its id as JSON — capturing it lets the engine back-fill
+# conviction outcomes per branch after collapse (roadmap §7.1).
+BRANCH_ID = re.compile(r'"branch_id"\s*:\s*"([A-Za-z0-9_-]{1,32})"')
 
 # Bound DB-inserted strings from transcripts. A compromised subagent or crafted
 # transcript could otherwise persist megabytes of attacker-controlled text into the
@@ -160,6 +163,28 @@ def db_path(cwd: Path) -> Path:
     return cwd / ".claude" / "hooks" / "memory" / "pqa_memory.db"
 
 
+def _branch_id(text: str) -> str | None:
+    """The digest's branch_id, when the transcript carries one."""
+    match = BRANCH_ID.search(text)
+    return match.group(1) if match else None
+
+
+def _insert_signal(
+    conn: sqlite3.Connection, session: str, level: str, basis: str, branch: str | None, ts: int
+) -> None:
+    try:
+        conn.execute(
+            "INSERT INTO signals(session_id, level, basis, branch, created_at) VALUES(?,?,?,?,?)",
+            (session, level, basis, branch, ts),
+        )
+    except sqlite3.OperationalError:
+        # Pre-002 schema without the branch column: never block, never lose the signal.
+        conn.execute(
+            "INSERT INTO signals(session_id, level, basis, created_at) VALUES(?,?,?,?)",
+            (session, level, basis, ts),
+        )
+
+
 def persist(cwd: Path, session: str, text: str) -> bool:
     path = db_path(cwd)
     if not path.exists():
@@ -174,10 +199,10 @@ def persist(cwd: Path, session: str, text: str) -> bool:
                     "VALUES(?,?,?,?)",
                     (session, name.strip()[:MAX_NAME_LEN], why.strip()[:MAX_BASIS_LEN], ts),
                 )
+            branch = _branch_id(text)
             for level, basis in CONVICTION.findall(text):
-                conn.execute(
-                    "INSERT INTO signals(session_id, level, basis, created_at) VALUES(?,?,?,?)",
-                    (session, level.lower(), basis.strip()[:MAX_BASIS_LEN], ts),
+                _insert_signal(
+                    conn, session, level.lower(), basis.strip()[:MAX_BASIS_LEN], branch, ts
                 )
         conn.close()
         return True
@@ -194,7 +219,11 @@ def fallback_log(cwd: Path, session: str, text: str) -> None:
             for n, w in PRECIPITATE.findall(text)
         ],
         "signals": [
-            {"level": level.lower(), "basis": basis.strip()[:MAX_BASIS_LEN]}
+            {
+                "level": level.lower(),
+                "basis": basis.strip()[:MAX_BASIS_LEN],
+                "branch": _branch_id(text),
+            }
             for level, basis in CONVICTION.findall(text)
         ],
     }

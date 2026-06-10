@@ -69,6 +69,14 @@ class FailureHit:
 
 
 @dataclass(frozen=True)
+class InstinctHit:
+    id: int
+    name: str
+    statement: str
+    confidence: float
+
+
+@dataclass(frozen=True)
 class PriorArt:
     """The bounded prior-art block injected at frame-load: composed text plus the ids
     of every memory it cites, so the run report can name what influenced the run."""
@@ -216,6 +224,20 @@ def record_signal(
     return cur.lastrowid
 
 
+def _outcome_assignments(
+    survived: bool | None, verified: bool | None, won: bool | None
+) -> dict[str, int]:
+    """The outcome columns actually provided (None = still unknown, not written)."""
+    provided = {
+        col: int(flag)
+        for col, flag in (("survived", survived), ("verified", verified), ("won", won))
+        if flag is not None
+    }
+    if not provided:
+        raise ValueError("at least one outcome (survived/verified/won) must be provided")
+    return provided
+
+
 def update_signal_outcome(
     conn: sqlite3.Connection,
     signal_id: int,
@@ -227,13 +249,7 @@ def update_signal_outcome(
     """Back-fill what actually happened to a flagged branch: survived the adversary
     collision, passed the verifier, won the collapse. Only outcomes passed as
     booleans are written (None = still unknown). Returns False for an unknown id."""
-    provided = {
-        col: int(flag)
-        for col, flag in (("survived", survived), ("verified", verified), ("won", won))
-        if flag is not None
-    }
-    if not provided:
-        raise ValueError("at least one outcome (survived/verified/won) must be provided")
+    provided = _outcome_assignments(survived, verified, won)
     assignments = ", ".join(f"{col} = ?" for col in provided)
     cur = conn.execute(
         f"UPDATE signals SET {assignments}, outcome_at = ? WHERE id = ?",  # noqa: S608
@@ -241,6 +257,33 @@ def update_signal_outcome(
     )
     conn.commit()
     return cur.rowcount > 0
+
+
+def backfill_signal_outcomes(
+    conn: sqlite3.Connection,
+    session: str,
+    branch: str | None = None,
+    *,
+    survived: bool | None = None,
+    verified: bool | None = None,
+    won: bool | None = None,
+) -> int:
+    """Back-fill outcomes on every still-pending signal of a session (optionally one
+    branch) — the path for hook-captured signals whose ids the caller never saw.
+    Settled rows (outcome_at already set) are never touched. Returns rows updated."""
+    provided = _outcome_assignments(survived, verified, won)
+    assignments = ", ".join(f"{col} = ?" for col in provided)
+    where = "session_id = ? AND outcome_at IS NULL"
+    params: tuple[int | str, ...] = (*provided.values(), int(time.time()), session)
+    if branch is not None:
+        where += " AND branch = ?"
+        params += (branch,)
+    cur = conn.execute(
+        f"UPDATE signals SET {assignments}, outcome_at = ? WHERE {where}",  # noqa: S608
+        params,
+    )
+    conn.commit()
+    return cur.rowcount
 
 
 def _query_tokens(query: str) -> list[str]:
@@ -341,22 +384,59 @@ def search_precipitates(
     return [PrecipitateHit(*row) for row in rows]
 
 
+def search_instincts(conn: sqlite3.Connection, query: str, limit: int = 3) -> list[InstinctHit]:
+    """Top-`limit` instincts by relevance, confidence as the tiebreak. Always
+    LIKE-scored, never FTS: instincts are updated in place by re-synthesis, and the
+    FTS drift repair assumes append-only content tables."""
+    tokens = _query_tokens(query)
+    if not tokens:
+        return []
+    score = " + ".join("(CASE WHEN haystack LIKE ? THEN 1 ELSE 0 END)" for _ in tokens)
+    rows = conn.execute(
+        "SELECT id, name, statement, confidence FROM ("  # noqa: S608
+        f"SELECT id, name, statement, confidence, ({score}) AS relevance "
+        "FROM (SELECT id, name, statement, confidence, "
+        "name || ' ' || statement AS haystack FROM instincts)) "
+        "WHERE relevance > 0 ORDER BY relevance DESC, confidence DESC, id DESC LIMIT ?",
+        (*(f"%{t}%" for t in tokens), limit),
+    ).fetchall()
+    return [InstinctHit(*row) for row in rows]
+
+
+def instinct_statement(conn: sqlite3.Connection, instinct_id: int) -> str | None:
+    """The statement text of one instinct, for agreement telemetry. None if unknown."""
+    row = conn.execute("SELECT statement FROM instincts WHERE id = ?", (instinct_id,)).fetchone()
+    return None if row is None else str(row[0])
+
+
 def prior_art(
     conn: sqlite3.Connection, task: str, *, max_tokens: int = 400, k: int = 5
 ) -> PriorArt:
     """Compose the bounded prior-art block injected at frame-load: top-k relevant
-    failures (what not to re-propose) then precipitates (what won before), cut to the
-    token budget in relevance order. Every cited id appears in the text, so the run
-    report's `memories_injected` is auditable against the prompt that was built."""
+    failures (what not to re-propose), then instincts (distilled cross-run guidance),
+    then precipitates (what won before), cut to the token budget in that order. Every
+    cited id appears in the text, so the run report's `memories_injected` is auditable
+    against the prompt that was built."""
     if max_tokens <= 0:
         return PriorArt(ids=(), text="")
-    candidates = [
-        (f"failure:{hit.id}", f"- [failure:{hit.id}] {hit.approach}: {hit.death_reason}")
-        for hit in search_failures(conn, task, limit=k)
-    ] + [
-        (f"precipitate:{hit.id}", f"- [precipitate:{hit.id}] {hit.name}: {hit.rationale}")
-        for hit in search_precipitates(conn, task, limit=k)
-    ]
+    candidates = (
+        [
+            (f"failure:{hit.id}", f"- [failure:{hit.id}] {hit.approach}: {hit.death_reason}")
+            for hit in search_failures(conn, task, limit=k)
+        ]
+        + [
+            (
+                f"instinct:{hit.id}",
+                f"- [instinct:{hit.id}] {hit.name}: {hit.statement} "
+                f"(confidence {hit.confidence:.2f})",
+            )
+            for hit in search_instincts(conn, task, limit=3)
+        ]
+        + [
+            (f"precipitate:{hit.id}", f"- [precipitate:{hit.id}] {hit.name}: {hit.rationale}")
+            for hit in search_precipitates(conn, task, limit=k)
+        ]
+    )
     ids: list[str] = []
     lines: list[str] = []
     for memory_id, line in candidates:

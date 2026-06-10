@@ -870,3 +870,76 @@ def test_prior_art_token_budget_zero_disables_injection(conn: sqlite3.Connection
     )
     assert report.memories_injected == ()
     assert all("Prior art" not in b.prompt for b in report.branches)
+
+
+# ---------------------------------------------------------------------------
+# Phase 3c: conviction signals get outcomes; instincts are injected and tracked
+
+
+def test_run_backfills_signal_outcomes_for_flagged_branches(conn: sqlite3.Connection):
+    outputs = {
+        "b0": (
+            "def add(a, b): return a + b\n"
+            "# conviction: high, basis: queue backpressure absorbs ingest bursts\n"
+        ),
+        "b1": _divergent_outputs()["b1"],
+    }
+    report = run(
+        task="t",
+        session_id="sig-run",
+        base_prompt="x",
+        research=_research(),
+        selfeval=_selfeval(),
+        generator=_make_generator(outputs),
+        adversary=_make_adversary([]),
+        verifier=_make_verifier(
+            {
+                "b0": VerifyResult(has_tests=True, verified=True, coverage=90.0),
+                "b1": VerifyResult(has_tests=True, verified=False, coverage=None),
+            }
+        ),
+        budget=Budget(max_usd=10.0),
+        conn=conn,
+    )
+    assert report.survivor is not None
+    assert report.survivor.id == "b0"
+    rows = conn.execute(
+        "SELECT branch, level, survived, verified, won, outcome_at "
+        "FROM signals WHERE session_id='sig-run'"
+    ).fetchall()
+    assert len(rows) == 1, "only the conviction-flagged branch produces a signal"
+    branch, level, survived, verified, won, outcome_at = rows[0]
+    assert (branch, level, survived, verified, won) == ("b0", "high", 1, 1, 1)
+    assert outcome_at is not None
+
+
+def test_run_reports_injected_instincts_and_agreement(conn: sqlite3.Connection):
+    conn.execute(
+        "INSERT INTO instincts(name, statement, confidence, evidence_n, origin, created_at) "
+        "VALUES('adder-history', 'history class adder pattern', 0.7, 3, 'local', 0)"
+    )
+    conn.commit()
+    report = run(
+        task="adder with history class",
+        session_id="inst-run",
+        base_prompt="x",
+        research=_research(),
+        selfeval=_selfeval(),
+        generator=_make_generator(_divergent_outputs()),
+        adversary=_make_adversary([]),
+        verifier=_make_verifier(
+            {
+                "b0": VerifyResult(has_tests=True, verified=False, coverage=None),
+                "b1": VerifyResult(has_tests=True, verified=True, coverage=88.0),
+            }
+        ),
+        budget=Budget(max_usd=10.0),
+        conn=conn,
+    )
+    assert report.survivor is not None
+    assert report.survivor.id == "b1"
+    assert report.instincts_injected
+    assert all(i.startswith("instinct:") for i in report.instincts_injected)
+    assert set(report.instincts_injected) <= set(report.memories_injected)
+    agreement = dict(report.instinct_agreement)
+    assert agreement[report.instincts_injected[0]] is True
