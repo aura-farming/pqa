@@ -1,0 +1,4 @@
+name = "interval-merge"
+entry = "merge"
+prompt = "Implement merge(intervals) -> list[tuple[int, int]]: merge closed integer intervals (start, end), input in any order, output sorted by start."
+trap = "adjacency: closed intervals that touch — (1,2) and (2,3) — must merge to (1,3); strict-overlap comparisons miss it."

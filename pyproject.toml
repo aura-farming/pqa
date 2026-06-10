@@ -31,6 +31,10 @@ package = false
 [tool.ruff]
 line-length = 100
 target-version = "py314"
+# evals/tasks/* are LOCKED benchmark fixtures: verify.py is the measuring stick and
+# sabotage.py is deliberately wrong code. Linting/reformatting them is touching the
+# benchmark — the eval-smoke integrity gate is what validates them instead.
+extend-exclude = ["evals/tasks"]
 
 [tool.ruff.lint]
 # E/W pycodestyle, F pyflakes, I isort, B bugbear, UP pyupgrade, SIM simplify,

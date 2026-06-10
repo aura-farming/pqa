@@ -1,0 +1,4 @@
+name = "csv-escape"
+entry = "to_csv_row"
+prompt = "Implement to_csv_row(fields: list[str]) -> str per RFC 4180: quote a field only when it contains a comma, double-quote, CR or LF; double any embedded quotes; join with commas (no trailing newline)."
+trap = "embedded double-quotes must be doubled INSIDE a quoted field; quoting everything without doubling corrupts round-tripping."

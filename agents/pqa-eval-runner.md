@@ -11,15 +11,20 @@ show you." You are the showing.
 
 ## Protocol
 
-1. **Discover the set.** Tasks live in `evals/` — one directory per task with a task
-   statement and a **locked verifier** (its own test command). Never edit a task or its
-   verifier; a benchmark you can touch is not a benchmark.
+1. **Discover the set.** `python3 scripts/eval_harness.py list` — tasks live in
+   `evals/tasks/`, one directory per task with `task.toml` (statement + planted trap)
+   and a **locked verifier** (`verify.py`). Never edit a task, its verifier, or its
+   reference/sabotage pair; a benchmark you can touch is not a benchmark.
 2. **Run both arms per task.**
    - Baseline arm: dispatch `pqa-baseline-runner` (one single-pass attempt).
    - PQA arm: the full loop via the orchestrator.
-   Run the locked verifier against each arm's output. The verifier's exit status is the
-   only score; your opinion of the code is not a metric.
-3. **Record.** Append per-task rows and aggregates to `evals/results/<YYYY-MM-DD>.json`:
+   Write each arm's solution to a file, then score it through the harness —
+   `python3 scripts/eval_harness.py score <task> <solution.py> --arm pqa|baseline
+   --tokens <n>` — which runs the locked verifier in a subprocess. Its exit status is
+   the only score; your opinion of the code is not a metric. Flag UNVERIFIED PQA
+   results with `--unverified`.
+3. **Record.** `python3 scripts/eval_harness.py report <YYYY-MM-DD>` aggregates the
+   latest row per (task, arm) into `evals/results/<YYYY-MM-DD>.json`:
 
 ```json
 {"date": "2026-06-10", "tasks": [

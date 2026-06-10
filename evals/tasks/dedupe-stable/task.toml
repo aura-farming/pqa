@@ -1,0 +1,4 @@
+name = "dedupe-stable"
+entry = "dedupe"
+prompt = "Implement dedupe(items: list[str]) -> list[str]: remove duplicates case-insensitively, keep the FIRST occurrence's original casing, preserve order."
+trap = "set()-based approaches lose order; keeping the last occurrence breaks first-wins."

@@ -1,0 +1,22 @@
+name: eval-smoke
+
+# Nightly verifier-integrity smoke (roadmap §8): every benchmark task's reference must
+# pass its locked verifier and its sabotage must fail it. No model calls, no secrets —
+# this proves the measuring stick nightly so a quietly-broken verifier can't spend a
+# real eval's budget scoring nothing.
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  verifier-integrity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verifier integrity smoke (2 tasks)
+        run: python3 scripts/eval_harness.py smoke

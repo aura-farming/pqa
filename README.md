@@ -70,8 +70,24 @@ flowchart LR
 ## Measure it yourself
 
 The claims are meant to be falsifiable. `/baseline` captures the single-pass result for a
-task; `/eval` benchmarks PQA against that baseline over time. If PQA doesn't beat
-single-pass on your work, the harness will show you.
+task; `/eval` benchmarks PQA against that baseline over the locked set in `evals/`. If PQA
+doesn't beat single-pass on your work, the harness will show you.
+
+- **8 benchmark tasks** (`evals/tasks/*`), each a small real problem with a planted trap:
+  window-boundary bursts, interval adjacency, RFC 4180 quote doubling, path traversal via
+  prefix tricks, TTL-aware eviction, stable dedupe, capped jitter, unicode slugs.
+- **Locked verifiers.** Each task ships `verify.py` — never edited by any arm — plus a
+  `reference.py` that must pass it and a `sabotage.py` (the trap, embodied) that must
+  fail it. The test suite proves that integrity for all 8 on every push; nightly CI
+  re-proves it.
+- **Deterministic scoring** (`scripts/eval_harness.py`): agents produce solutions; the
+  harness scores them (`score`) and aggregates (`report`) into
+  `evals/results/<date>.json` — wins, losses, ties, UNVERIFIED rate, cost ratio, with
+  losses listed first.
+
+Run it yourself: `/eval` (both arms, full set, real model spend) or
+`python3 scripts/eval_harness.py smoke --all` (verifier integrity only, zero model
+calls). First published live results land here with the 0.3.0 release — losses included.
 
 ## What's in the box
 

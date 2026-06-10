@@ -1,0 +1,4 @@
+name = "rate-limiter-burst"
+entry = "allow"
+prompt = "Implement allow(events, limit, window) -> list[bool]. events is a time-ordered list of (timestamp: float, key: str). Return one bool per event: True if the key has seen fewer than `limit` allowed events in the trailing `window` seconds (sliding, inclusive of nothing older than timestamp-window)."
+trap = "burst at the window boundary: a fixed/epoch-bucketed window admits 2x the limit when two bursts straddle a bucket edge."
