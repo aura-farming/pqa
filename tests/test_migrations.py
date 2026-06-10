@@ -295,3 +295,51 @@ def test_real_initial_migration_creates_pqa_schema(tmp_path: Path):
         assert expected <= tables
     finally:
         conn.close()
+
+
+def test_real_migration_002_adds_signal_outcome_columns(tmp_path: Path):
+    """Migration 002 widens `signals` with the outcome columns the calibration
+    loop back-fills after collapse (branch, verified, won, outcome_at)."""
+    repo_root = Path(__file__).resolve().parent.parent
+    migrations_dir = repo_root / "hooks" / "memory" / "migrations"
+    if not migrations_dir.exists():
+        pytest.skip("migrations directory not present in this checkout")
+
+    migrations = discover_migrations(migrations_dir)
+    assert len(migrations) >= 2, "migration 002 not shipped yet"
+
+    conn = sqlite3.connect(str(tmp_path / "real.db"))
+    try:
+        apply_migrations(conn, migrations)
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(signals)").fetchall()}
+        assert {"branch", "verified", "won", "outcome_at"} <= cols
+    finally:
+        conn.close()
+
+
+def test_real_migration_002_upgrades_an_001_database_in_place(tmp_path: Path):
+    """An operator on the 001 schema with existing signal rows upgrades cleanly:
+    old rows survive with NULL in the new outcome columns."""
+    repo_root = Path(__file__).resolve().parent.parent
+    migrations_dir = repo_root / "hooks" / "memory" / "migrations"
+    if not migrations_dir.exists():
+        pytest.skip("migrations directory not present in this checkout")
+
+    migrations = discover_migrations(migrations_dir)
+    assert len(migrations) >= 2, "migration 002 not shipped yet"
+
+    conn = sqlite3.connect(str(tmp_path / "real.db"))
+    try:
+        apply_migrations(conn, migrations[:1])  # the 001 world
+        conn.execute(
+            "INSERT INTO signals(session_id, level, basis, created_at) VALUES('s1','high','gut',1)"
+        )
+        conn.commit()
+
+        apply_migrations(conn, migrations)  # upgrade to current
+        row = conn.execute(
+            "SELECT level, basis, branch, verified, won, outcome_at FROM signals"
+        ).fetchone()
+        assert row == ("high", "gut", None, None, None, None)
+    finally:
+        conn.close()

@@ -515,9 +515,7 @@ def test_research_gate_fires_once_per_session(tmp_path: Path) -> None:
     assert "PQA" in out1
     assert out2.strip() == ""  # second prompt in the same session is silent
     # A different session re-arms the gate.
-    _rc3, out3, _ = _run_hook_env(
-        "research_gate.py", {**payload, "session_id": "sess-xyz"}, env
-    )
+    _rc3, out3, _ = _run_hook_env("research_gate.py", {**payload, "session_id": "sess-xyz"}, env)
     assert "PQA" in out3
 
 
@@ -528,9 +526,7 @@ def test_research_gate_fires_once_per_session(tmp_path: Path) -> None:
 
 def test_disabled_hook_research_gate_stays_silent() -> None:
     env = {**os.environ, "PQA_DISABLED_HOOKS": "research_gate"}
-    rc, out, _ = _run_hook_env(
-        "research_gate.py", {"prompt": "implement a rate limiter"}, env
-    )
+    rc, out, _ = _run_hook_env("research_gate.py", {"prompt": "implement a rate limiter"}, env)
     assert rc == 0
     assert out.strip() == ""
 
@@ -549,26 +545,20 @@ def test_security_gate_ignores_disable_without_allow_unsafe() -> None:
     """Listing a security hook is NOT enough — without PQA_ALLOW_UNSAFE=1 it still blocks."""
     env = {**os.environ, "PQA_DISABLED_HOOKS": "security_gate"}
     env.pop("PQA_ALLOW_UNSAFE", None)
-    rc, _out, err = _run_hook_env(
-        "security_gate.py", {"tool_input": {"command": "rm -rf /"}}, env
-    )
+    rc, _out, err = _run_hook_env("security_gate.py", {"tool_input": {"command": "rm -rf /"}}, env)
     assert rc == 2
     assert "PQA_ALLOW_UNSAFE" in err  # the block message states the real override
 
 
 def test_security_gate_double_optin_disables() -> None:
     env = {**os.environ, "PQA_DISABLED_HOOKS": "security_gate", "PQA_ALLOW_UNSAFE": "1"}
-    rc, _out, _err = _run_hook_env(
-        "security_gate.py", {"tool_input": {"command": "rm -rf /"}}, env
-    )
+    rc, _out, _err = _run_hook_env("security_gate.py", {"tool_input": {"command": "rm -rf /"}}, env)
     assert rc == 0
 
 
 def test_secrets_guard_double_optin_disables() -> None:
     env = {**os.environ, "PQA_DISABLED_HOOKS": "secrets_guard", "PQA_ALLOW_UNSAFE": "1"}
-    rc, _out, _err = _run_hook_env(
-        "secrets_guard.py", {"tool_input": {"file_path": ".env"}}, env
-    )
+    rc, _out, _err = _run_hook_env("secrets_guard.py", {"tool_input": {"file_path": ".env"}}, env)
     assert rc == 0
 
 

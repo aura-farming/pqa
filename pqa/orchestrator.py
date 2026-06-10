@@ -32,7 +32,7 @@ from pqa.collision import Finding, score_all
 from pqa.cost import Budget, CostGovernor
 from pqa.divergence import DivergenceReport
 from pqa.frame import Frame, detect_disagreement, record_frame, update_resolved_by
-from pqa.memory import Failure, record_failure, record_precipitate
+from pqa.memory import Failure, prior_art, record_failure, record_precipitate
 from pqa.superposition import (
     Branch,
     RespawnPlan,
@@ -134,6 +134,7 @@ def _aborted_report(
     divergence: DivergenceReport | None,
     governor: CostGovernor,
     started_at: int,
+    memories: tuple[str, ...] = (),
 ) -> RunReport:
     return RunReport(
         task=task,
@@ -150,6 +151,8 @@ def _aborted_report(
         abort_reason=reason,
         started_at=started_at,
         finished_at=int(time.time()),
+        # Aborted runs are persisted and learned from, so they cite injections too.
+        memories_injected=memories,
     )
 
 
@@ -248,12 +251,18 @@ def run(
     injected_memory_ids: tuple[str, ...] = (),
     spiral_depth: int = 0,
     max_spiral_depth: int = 1,
+    prior_art_token_budget: int = 400,
 ) -> RunReport:
     """One PQA run, end-to-end.
 
     Returns a RunReport regardless of outcome — even an aborted run produces a report
     with `aborted=True` and the cost-governor snapshot, so the caller can persist it
     and learn from it.
+
+    The frame step queries memory itself (roadmap §4.3.3): top-k relevant failures and
+    precipitates are injected into the generation prompt under a hard token budget
+    (`prior_art_token_budget`, 0 disables), and every injected memory id is reported in
+    `memories_injected` alongside any ids the caller injected out-of-band.
     """
     started_at = int(time.time())
     governor = CostGovernor(budget)
@@ -274,6 +283,13 @@ def run(
         )
 
     # ---- 1. Frame collision ------------------------------------------------
+    # The frame step performs the memory query itself — retrieval by relevance,
+    # bounded by a hard token budget, with every injected id reported so the run
+    # report can name what influenced the run.
+    art = prior_art(conn, task, max_tokens=prior_art_token_budget)
+    memories = injected_memory_ids + art.ids
+    prompt = f"{base_prompt}\n\n{art.text}" if art.ids else base_prompt
+
     disagreement = detect_disagreement(research, selfeval)
 
     # Human-in-the-loop perturbation point: the operator can abort here if the
@@ -292,16 +308,19 @@ def run(
                 None,
                 governor,
                 started_at,
+                memories,
             )
 
     frame_id = record_frame(conn, session_id, task, research, selfeval, disagreement)
 
     # ---- 2. Spawn + generate ----------------------------------------------
     branches, abort = _generate_all(
-        n_branches, base_prompt, research, selfeval, generator, governor, force_non_obvious
+        n_branches, prompt, research, selfeval, generator, governor, force_non_obvious
     )
     if abort:
-        return _aborted_report(task, session_id, abort, branches, [], None, governor, started_at)
+        return _aborted_report(
+            task, session_id, abort, branches, [], None, governor, started_at, memories
+        )
 
     # ---- 3. Divergence gate ------------------------------------------------
     divergence = validate_divergence(branches)
@@ -320,6 +339,7 @@ def run(
                 divergence,
                 governor,
                 started_at,
+                memories,
             )
     if plan.action == "abort":
         return _aborted_report(
@@ -331,6 +351,7 @@ def run(
             divergence,
             governor,
             started_at,
+            memories,
         )
 
     # ---- 4. Adversary ------------------------------------------------------
@@ -346,6 +367,7 @@ def run(
             divergence,
             governor,
             started_at,
+            memories,
         )
     scores = score_all(findings, branch_ids=[b.id for b in branches])
 
@@ -392,6 +414,7 @@ def run(
                 divergence,
                 governor,
                 started_at,
+                memories,
             )
 
     # ---- 7. Collapse -------------------------------------------------------
@@ -456,7 +479,7 @@ def run(
         abort_reason=None,
         started_at=started_at,
         finished_at=finished_at,
-        memories_injected=injected_memory_ids,
+        memories_injected=memories,
         spiral_depth=spiral_depth,
     )
 

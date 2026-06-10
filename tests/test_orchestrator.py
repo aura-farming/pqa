@@ -17,7 +17,7 @@ from pqa.collapse import BranchResult
 from pqa.collision import Finding
 from pqa.cost import Budget
 from pqa.frame import Frame
-from pqa.memory import connect
+from pqa.memory import Failure, connect, record_failure
 from pqa.orchestrator import HumanCheckpoints, RunReport, VerifyResult, run
 from pqa.superposition import Branch
 
@@ -799,3 +799,74 @@ def test_timestamps_are_set(conn: sqlite3.Connection):
     )
     assert report.started_at > 0
     assert report.finished_at >= report.started_at
+
+
+# ---------------------------------------------------------------------------
+# Prior-art injection at frame-load (roadmap §4.3.3 — the query is no longer aspirational)
+
+
+def _seed_rate_limiter_failure(conn: sqlite3.Connection) -> None:
+    record_failure(
+        conn,
+        "earlier-run",
+        "build a rate limiter",
+        Failure("fixed-window counter", "fails burst-at-boundary", "high"),
+    )
+
+
+def test_run_injects_prior_art_into_generation_and_report(conn: sqlite3.Connection):
+    _seed_rate_limiter_failure(conn)
+    report = run(
+        task="build a rate limiter",
+        session_id="s2",
+        base_prompt="build a rate limiter",
+        research=_research(),
+        selfeval=_selfeval(),
+        generator=_make_generator(_divergent_outputs()),
+        adversary=_make_adversary([]),
+        verifier=_make_verifier({"b0": VerifyResult(has_tests=True, verified=True, coverage=80.0)}),
+        budget=Budget(max_usd=10.0),
+        conn=conn,
+    )
+    assert "failure:1" in report.memories_injected
+    # The dead approach reached every generator prompt, so no branch re-proposes it blind.
+    assert all("fails burst-at-boundary" in b.prompt for b in report.branches)
+
+
+def test_aborted_run_still_cites_injected_memories(conn: sqlite3.Connection):
+    """Even a budget-aborted report must name what was injected — aborted runs are
+    persisted and learned from too."""
+    _seed_rate_limiter_failure(conn)
+    report = run(
+        task="build a rate limiter",
+        session_id="s2",
+        base_prompt="build a rate limiter",
+        research=_research(),
+        selfeval=_selfeval(),
+        generator=_make_generator(_divergent_outputs()),
+        adversary=_make_adversary([]),
+        verifier=_make_verifier({}),
+        budget=Budget(max_usd=0.000001),  # trips the cap on the first generation
+        conn=conn,
+    )
+    assert report.aborted is True
+    assert "failure:1" in report.memories_injected
+
+
+def test_prior_art_token_budget_zero_disables_injection(conn: sqlite3.Connection):
+    _seed_rate_limiter_failure(conn)
+    report = run(
+        task="build a rate limiter",
+        session_id="s2",
+        base_prompt="build a rate limiter",
+        research=_research(),
+        selfeval=_selfeval(),
+        generator=_make_generator(_divergent_outputs()),
+        adversary=_make_adversary([]),
+        verifier=_make_verifier({"b0": VerifyResult(has_tests=True, verified=True, coverage=80.0)}),
+        budget=Budget(max_usd=10.0),
+        conn=conn,
+        prior_art_token_budget=0,
+    )
+    assert report.memories_injected == ()
+    assert all("Prior art" not in b.prompt for b in report.branches)

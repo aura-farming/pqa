@@ -127,25 +127,19 @@ def test_config_resolved_model_maps_alias_to_dispatch_key(
     assert cfg.resolved_model() == "claude-opus-4-8"
 
 
-def test_config_rejects_token_budget_below_floor(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
+def test_config_rejects_token_budget_below_floor(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.setenv("PQA_RUN_BUDGET_TOKENS", "5000")
     with pytest.raises(ValueError):
         load_or_defaults(tmp_path / "absent.toml")
 
 
-def test_config_rejects_out_of_range_spiral_depth(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
+def test_config_rejects_out_of_range_spiral_depth(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.setenv("PQA_MAX_SPIRAL_DEPTH", "9")
     with pytest.raises(ValueError):
         load_or_defaults(tmp_path / "absent.toml")
 
 
-def test_config_rejects_unknown_branches_mode(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
+def test_config_rejects_unknown_branches_mode(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.setenv("PQA_BRANCHES_MODE", "teleport")
     with pytest.raises(ValueError):
         load_or_defaults(tmp_path / "absent.toml")

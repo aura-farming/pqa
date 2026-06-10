@@ -42,6 +42,13 @@ MODEL_ALIASES: dict[str, str] = {
 }
 
 
+def estimate_tokens(text: str) -> int:
+    """Chars/4 heuristic — an estimate, not a tokenizer. Used only for sizing
+    bounded context injections (e.g. the prior-art block at frame-load), never
+    for billing: real spend is recorded from actual token counts."""
+    return 0 if not text else max(1, len(text) // 4)
+
+
 def resolve_model(name: str) -> str:
     """Resolve an alias or concrete model id to a MODEL_PRICING key.
 

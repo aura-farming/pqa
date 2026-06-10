@@ -9,7 +9,7 @@ import threading
 
 import pytest
 
-from pqa.cost import MODEL_PRICING, Budget, CostGovernor, Spend, cost_for
+from pqa.cost import MODEL_PRICING, Budget, CostGovernor, Spend, cost_for, estimate_tokens
 
 
 def test_cost_for_opus_pricing():
@@ -305,3 +305,19 @@ def test_would_abort_thread_safe_under_concurrent_record():
     # Final state stable; no deadlock.
     assert g.total().input_tokens == 2 * 500 * 10
     assert not g.should_abort()
+
+
+# ---------------------------------------------------------------------------
+# estimate_tokens — the heuristic behind injection budgets (roadmap §4.3.2)
+
+
+def test_estimate_tokens_empty_is_zero():
+    assert estimate_tokens("") == 0
+
+
+def test_estimate_tokens_uses_chars_over_4():
+    assert estimate_tokens("x" * 400) == 100
+
+
+def test_estimate_tokens_nonempty_is_at_least_one():
+    assert estimate_tokens("ab") == 1
