@@ -172,3 +172,69 @@ def test_validator_write_catalog_regenerates_from_files(tmp_path: Path):
     catalog = json.loads((tmp_path / "docs" / "catalog.json").read_text())
     assert catalog["agents"][0]["name"] == "pqa-verifier"
     assert validator.validate(tmp_path) == []
+
+
+# ---------------------------------------------------------------------------
+# Skills — the twelve deep playbooks (roadmap §6.2, Phase 3b)
+
+TWELVE_SKILLS = frozenset(
+    {
+        "superposition-branching",
+        "adversarial-collision",
+        "empirical-collapse",
+        "topological-divergence",
+        "perturbation-operators",
+        "conviction-signalling",
+        "failure-taxonomy",
+        "git-worktree-orchestration",
+        "cost-aware-pipeline",
+        "untrusted-research",
+        "language-verification",
+        "the-spiral",
+    }
+)
+
+
+def test_shipped_skills_are_exactly_the_twelve_playbooks():
+    """§6.2: 59 stubs → 12 deep skills. Adding a skill is a curation decision,
+    the same way adding an agent is a routing decision."""
+    on_disk = {p.name for p in (REPO / "skills").iterdir() if p.is_dir()}
+    assert on_disk == TWELVE_SKILLS, (
+        f"unexpected: {sorted(on_disk - TWELVE_SKILLS)}; missing: {sorted(TWELVE_SKILLS - on_disk)}"
+    )
+
+
+def test_every_shipped_skill_is_a_real_playbook():
+    """The depth bar: a worked example and anti-patterns, not just principles."""
+    for name in sorted(TWELVE_SKILLS):
+        body = (REPO / "skills" / name / "SKILL.md").read_text(encoding="utf-8").lower()
+        assert "## worked example" in body, f"{name}: missing a worked example"
+        assert "anti-pattern" in body, f"{name}: missing anti-patterns"
+
+
+def test_validator_flags_thin_skills(tmp_path: Path):
+    """Phase 3b arms the depth gate: a skill body under 60 non-blank lines is a stub."""
+    validator = _load_validator()
+    skill = tmp_path / "skills" / "thin-skill"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "---\nname: thin-skill\ndescription: Use when testing the depth gate.\n---\n"
+        + "line\n" * 10
+    )
+    violations = validator.validate(tmp_path)
+    assert any("thin-skill" in v and "60" in v for v in violations)
+
+
+def test_validator_flags_overlong_skill_descriptions(tmp_path: Path):
+    """Skill descriptions join the ≤15-word session-tax budget agents already pay."""
+    validator = _load_validator()
+    skill = tmp_path / "skills" / "windy-skill"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "---\nname: windy-skill\ndescription: "
+        + " ".join(["word"] * 30)
+        + "\n---\n"
+        + "line\n" * 80
+    )
+    violations = validator.validate(tmp_path)
+    assert any("windy-skill" in v and "description" in v for v in violations)

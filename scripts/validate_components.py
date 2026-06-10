@@ -9,8 +9,9 @@ surface stays disciplined instead of stamping it into existence:
                   (Fable 5 for coding/judgment, sonnet mechanical, haiku bookkeeping —
                   operator directive 2026-06-10).
 - commands/*.md — description ≤ 15 words; body stays thin (≤ 60 lines).
-- skills/*/     — SKILL.md present, frontmatter parses, name matches the directory.
-                  (The ≥ 60-line depth gate arrives with the Phase-3b skill rewrite.)
+- skills/*/     — SKILL.md present, frontmatter parses, name matches the directory,
+                  description ≤ 15 words, body ≥ 60 non-blank lines (skills are deep
+                  playbooks, not stubs — roadmap §6.2).
 - docs/catalog.json — regenerated FROM the files (`--write-catalog`), and validated
                   equal otherwise, so the catalog can never drift from disk.
 
@@ -26,6 +27,7 @@ from pathlib import Path
 
 MAX_DESCRIPTION_WORDS = 15
 MAX_COMMAND_BODY_LINES = 60
+MIN_SKILL_BODY_LINES = 60
 VALID_MODELS = frozenset({"fable", "opus", "sonnet", "haiku"})
 
 # Routing table (operator directive 2026-06-10 + roadmap §5.1): Fable 5 does the
@@ -125,16 +127,35 @@ def _check_command(path: Path) -> list[str]:
     return violations
 
 
+def _skill_body_lines(text: str) -> int:
+    """Non-blank lines after the frontmatter — the 'real content' the depth gate counts."""
+    body = text
+    if text.startswith("---\n"):
+        end = text.find("\n---", 4)
+        if end != -1:
+            body = text[end + 4 :]
+    return sum(1 for line in body.splitlines() if line.strip())
+
+
 def _check_skill(skill_dir: Path) -> list[str]:
     label = f"skills/{skill_dir.name}"
     skill_md = skill_dir / "SKILL.md"
     if not skill_md.exists():
         return [f"{label}: missing SKILL.md"]
-    fields, violations = parse_frontmatter(skill_md.read_text(encoding="utf-8"), label)
+    text = skill_md.read_text(encoding="utf-8")
+    fields, violations = parse_frontmatter(text, label)
     if fields.get("name", skill_dir.name) != skill_dir.name:
         violations.append(f"{label}: name {fields.get('name')!r} != directory name")
     if "description" not in fields:
         violations.append(f"{label}: missing frontmatter key 'description'")
+    else:
+        violations += _check_description(fields["description"], label)
+    body_lines = _skill_body_lines(text)
+    if body_lines < MIN_SKILL_BODY_LINES:
+        violations.append(
+            f"{label}: {body_lines} non-blank body lines (min {MIN_SKILL_BODY_LINES}) — "
+            "skills are deep playbooks, not stubs"
+        )
     return violations
 
 
