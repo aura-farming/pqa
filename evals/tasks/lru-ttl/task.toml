@@ -1,0 +1,4 @@
+name = "lru-ttl"
+entry = "LRUTTL"
+prompt = "Implement class LRUTTL(capacity: int, ttl: float) with put(key, value, now) and get(key, now) -> value | None. Entries expire ttl seconds after their last put. When inserting at capacity, evict an expired entry first if any exists, else the least-recently-used live entry. get refreshes recency, not expiry."
+trap = "eviction at capacity must prefer expired entries — evicting the LRU live entry while a corpse occupies a slot loses live data."

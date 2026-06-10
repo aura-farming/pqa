@@ -16,6 +16,8 @@ import re
 import sys
 from typing import Any, cast
 
+from hook_common import disable_hint, is_disabled
+
 # (pattern, human reason). Each pattern is case-insensitive at match time.
 # Patterns are intentionally specific; over-broad patterns produce false positives that
 # train the operator to disable the gate. Under-broad patterns let attackers through.
@@ -156,6 +158,8 @@ MAX_COMMAND_BYTES: int = 65_536  # 64 KB — bounds regex backtracking time acro
 
 
 def main() -> int:
+    if is_disabled("security_gate"):
+        return 0  # requires PQA_DISABLED_HOOKS=security_gate AND PQA_ALLOW_UNSAFE=1
     payload = read_payload()
     if payload is None:
         sys.stderr.write(
@@ -181,9 +185,10 @@ def main() -> int:
         return 0
     sys.stderr.write(
         f"PQA security gate blocked this command: {reason}.\n"
-        "This gate cannot be disabled to proceed. Find a safe alternative — "
-        "for example, scope deletes to a specific path, use --force-with-lease, "
-        "download then inspect before executing, and never read or transmit secrets.\n"
+        "Do not work around the gate. Find a safe alternative — scope deletes to a "
+        "specific path, use --force-with-lease, download then inspect before "
+        "executing, and never read or transmit secrets.\n"
+        f"{disable_hint('security_gate')}\n"
     )
     return 2  # exit 2 → Claude Code cancels the command and shows stderr to the model
 

@@ -1,0 +1,4 @@
+name = "retry-jitter"
+entry = "backoff_delays"
+prompt = "Implement backoff_delays(attempts: int, base: float, cap: float, seed: int) -> list[float]: full-jitter exponential backoff — delay i is uniform in [0, min(cap, base * 2**i)], using random.Random(seed) for determinism."
+trap = "the cap must bound the jitter RANGE, not clip after the fact with the range unbounded; uncapped growth recreates the thundering herd."

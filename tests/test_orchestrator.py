@@ -17,7 +17,7 @@ from pqa.collapse import BranchResult
 from pqa.collision import Finding
 from pqa.cost import Budget
 from pqa.frame import Frame
-from pqa.memory import connect
+from pqa.memory import Failure, connect, record_failure
 from pqa.orchestrator import HumanCheckpoints, RunReport, VerifyResult, run
 from pqa.superposition import Branch
 
@@ -799,3 +799,238 @@ def test_timestamps_are_set(conn: sqlite3.Connection):
     )
     assert report.started_at > 0
     assert report.finished_at >= report.started_at
+
+
+# ---------------------------------------------------------------------------
+# Prior-art injection at frame-load (roadmap §4.3.3 — the query is no longer aspirational)
+
+
+def _seed_rate_limiter_failure(conn: sqlite3.Connection) -> None:
+    record_failure(
+        conn,
+        "earlier-run",
+        "build a rate limiter",
+        Failure("fixed-window counter", "fails burst-at-boundary", "high"),
+    )
+
+
+def test_run_injects_prior_art_into_generation_and_report(conn: sqlite3.Connection):
+    _seed_rate_limiter_failure(conn)
+    report = run(
+        task="build a rate limiter",
+        session_id="s2",
+        base_prompt="build a rate limiter",
+        research=_research(),
+        selfeval=_selfeval(),
+        generator=_make_generator(_divergent_outputs()),
+        adversary=_make_adversary([]),
+        verifier=_make_verifier({"b0": VerifyResult(has_tests=True, verified=True, coverage=80.0)}),
+        budget=Budget(max_usd=10.0),
+        conn=conn,
+    )
+    assert "failure:1" in report.memories_injected
+    # The dead approach reached every generator prompt, so no branch re-proposes it blind.
+    assert all("fails burst-at-boundary" in b.prompt for b in report.branches)
+
+
+def test_aborted_run_still_cites_injected_memories(conn: sqlite3.Connection):
+    """Even a budget-aborted report must name what was injected — aborted runs are
+    persisted and learned from too."""
+    _seed_rate_limiter_failure(conn)
+    report = run(
+        task="build a rate limiter",
+        session_id="s2",
+        base_prompt="build a rate limiter",
+        research=_research(),
+        selfeval=_selfeval(),
+        generator=_make_generator(_divergent_outputs()),
+        adversary=_make_adversary([]),
+        verifier=_make_verifier({}),
+        budget=Budget(max_usd=0.000001),  # trips the cap on the first generation
+        conn=conn,
+    )
+    assert report.aborted is True
+    assert "failure:1" in report.memories_injected
+
+
+def test_prior_art_token_budget_zero_disables_injection(conn: sqlite3.Connection):
+    _seed_rate_limiter_failure(conn)
+    report = run(
+        task="build a rate limiter",
+        session_id="s2",
+        base_prompt="build a rate limiter",
+        research=_research(),
+        selfeval=_selfeval(),
+        generator=_make_generator(_divergent_outputs()),
+        adversary=_make_adversary([]),
+        verifier=_make_verifier({"b0": VerifyResult(has_tests=True, verified=True, coverage=80.0)}),
+        budget=Budget(max_usd=10.0),
+        conn=conn,
+        prior_art_token_budget=0,
+    )
+    assert report.memories_injected == ()
+    assert all("Prior art" not in b.prompt for b in report.branches)
+
+
+# ---------------------------------------------------------------------------
+# Phase 3c: conviction signals get outcomes; instincts are injected and tracked
+
+
+def test_run_backfills_signal_outcomes_for_flagged_branches(conn: sqlite3.Connection):
+    outputs = {
+        "b0": (
+            "def add(a, b): return a + b\n"
+            "# conviction: high, basis: queue backpressure absorbs ingest bursts\n"
+        ),
+        "b1": _divergent_outputs()["b1"],
+    }
+    report = run(
+        task="t",
+        session_id="sig-run",
+        base_prompt="x",
+        research=_research(),
+        selfeval=_selfeval(),
+        generator=_make_generator(outputs),
+        adversary=_make_adversary([]),
+        verifier=_make_verifier(
+            {
+                "b0": VerifyResult(has_tests=True, verified=True, coverage=90.0),
+                "b1": VerifyResult(has_tests=True, verified=False, coverage=None),
+            }
+        ),
+        budget=Budget(max_usd=10.0),
+        conn=conn,
+    )
+    assert report.survivor is not None
+    assert report.survivor.id == "b0"
+    rows = conn.execute(
+        "SELECT branch, level, survived, verified, won, outcome_at "
+        "FROM signals WHERE session_id='sig-run'"
+    ).fetchall()
+    assert len(rows) == 1, "only the conviction-flagged branch produces a signal"
+    branch, level, survived, verified, won, outcome_at = rows[0]
+    assert (branch, level, survived, verified, won) == ("b0", "high", 1, 1, 1)
+    assert outcome_at is not None
+
+
+def test_run_reports_injected_instincts_and_agreement(conn: sqlite3.Connection):
+    conn.execute(
+        "INSERT INTO instincts(name, statement, confidence, evidence_n, origin, created_at) "
+        "VALUES('adder-history', 'history class adder pattern', 0.7, 3, 'local', 0)"
+    )
+    conn.commit()
+    report = run(
+        task="adder with history class",
+        session_id="inst-run",
+        base_prompt="x",
+        research=_research(),
+        selfeval=_selfeval(),
+        generator=_make_generator(_divergent_outputs()),
+        adversary=_make_adversary([]),
+        verifier=_make_verifier(
+            {
+                "b0": VerifyResult(has_tests=True, verified=False, coverage=None),
+                "b1": VerifyResult(has_tests=True, verified=True, coverage=88.0),
+            }
+        ),
+        budget=Budget(max_usd=10.0),
+        conn=conn,
+    )
+    assert report.survivor is not None
+    assert report.survivor.id == "b1"
+    assert report.instincts_injected
+    assert all(i.startswith("instinct:") for i in report.instincts_injected)
+    assert set(report.instincts_injected) <= set(report.memories_injected)
+    agreement = dict(report.instinct_agreement)
+    assert agreement[report.instincts_injected[0]] is True
+
+
+# ---------------------------------------------------------------------------
+# Worktree mode (roadmap §9): run() threads workdirs into the generator seeds
+
+
+def test_run_threads_workdirs_into_generator_seeds(conn: sqlite3.Connection):
+    seeds: list[Branch] = []
+    outputs = _divergent_outputs()
+
+    def generator(branch: Branch) -> tuple[Branch, int, int]:
+        seeds.append(branch)
+        populated = Branch(
+            id=branch.id,
+            prompt=branch.prompt,
+            output=outputs.get(branch.id, "x"),
+            incremental=branch.incremental,
+            model=branch.model,
+            workdir=branch.workdir,
+        )
+        return populated, 100, 50
+
+    report = run(
+        task="t",
+        session_id="s",
+        base_prompt="x",
+        research=_research(),
+        selfeval=_selfeval(),
+        generator=generator,
+        adversary=_make_adversary([]),
+        verifier=_make_verifier(
+            {
+                "b0": VerifyResult(has_tests=True, verified=True, coverage=80.0),
+                "b1": VerifyResult(has_tests=True, verified=False, coverage=None),
+            }
+        ),
+        budget=Budget(max_usd=10.0),
+        conn=conn,
+        n_branches=2,
+        workdirs=[".pqa_worktrees/s-b1", ".pqa_worktrees/s-b2"],
+    )
+    assert [b.workdir for b in seeds] == [".pqa_worktrees/s-b1", ".pqa_worktrees/s-b2"]
+    assert [b.workdir for b in report.branches] == [
+        ".pqa_worktrees/s-b1",
+        ".pqa_worktrees/s-b2",
+    ]
+
+
+def test_run_workdirs_length_mismatch_raises(conn: sqlite3.Connection):
+    with pytest.raises(ValueError, match="workdirs"):
+        run(
+            task="t",
+            session_id="s",
+            base_prompt="x",
+            research=_research(),
+            selfeval=_selfeval(),
+            generator=_make_generator(_divergent_outputs()),
+            adversary=_make_adversary([]),
+            verifier=_make_verifier({}),
+            budget=Budget(max_usd=10.0),
+            conn=conn,
+            n_branches=2,
+            workdirs=[".pqa_worktrees/s-b1"],
+        )
+
+
+def test_respawn_seed_preserves_workdir():
+    """A respawned branch reuses its worktree: the P_reframe seed must carry the
+    victim's workdir so the regenerated solution lands in the same isolated tree."""
+    from pqa.cost import CostGovernor
+    from pqa.orchestrator import _respawn_similar
+
+    governor = CostGovernor(Budget(max_usd=10.0))
+    branches = [
+        Branch(id="b0", prompt="p0", output="def f():\n    return 1\n", workdir="w0"),
+        Branch(id="b1", prompt="p1", output="def g():\n    return 1\n", workdir="w1"),
+    ]
+    captured: list[Branch] = []
+
+    def generator(branch: Branch) -> tuple[Branch, int, int]:
+        captured.append(branch)
+        populated = Branch(
+            id=branch.id,
+            prompt=branch.prompt,
+            output="class Z:\n    pass\n",
+            workdir=branch.workdir,
+        )
+        return populated, 10, 5
+
+    _respawn_similar(branches, (0, 1), generator, governor, force_non_obvious=None)
+    assert captured[0].workdir == "w1"  # victim b1 regenerates into its own tree

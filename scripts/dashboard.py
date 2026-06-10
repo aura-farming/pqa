@@ -45,7 +45,8 @@ def render(db: Path) -> str:
     out.append(
         f"precipitates: {_count(conn, 'precipitates')}   "
         f"failures: {_count(conn, 'failures')}   "
-        f"signals: {_count(conn, 'signals')}"
+        f"signals: {_count(conn, 'signals')}   "
+        f"instincts: {_count(conn, 'instincts')}"
     )
 
     out.append("\nRecent precipitates (what won, and why):")
@@ -60,11 +61,33 @@ def render(db: Path) -> str:
     ):
         out.append(f"  - {approach}  (died {n}x)")
 
-    out.append("\nConviction vs reality (where instinct met the verifier):")
-    for level, n in _rows(
-        conn, "SELECT level, COUNT(*) FROM signals GROUP BY level ORDER BY level"
+    out.append("\nConviction calibration (P(win) per flagged level vs base rate):")
+    for level, n, wins, pending in _rows(
+        conn,
+        "SELECT level, count(CASE WHEN outcome_at IS NOT NULL THEN 1 END), "
+        "sum(CASE WHEN outcome_at IS NOT NULL AND won = 1 THEN 1 ELSE 0 END), "
+        "count(CASE WHEN outcome_at IS NULL THEN 1 END) "
+        "FROM signals GROUP BY level ORDER BY level",
     ):
-        out.append(f"  {level}: {n} flagged")
+        rate = f"P(win)={(wins or 0) / n:.2f} ({wins or 0}/{n})" if n else "no outcomes yet"
+        suffix = f", {pending} pending back-fill" if pending else ""
+        out.append(f"  {level}: {rate}{suffix}")
+    for precip, merit_deaths in _rows(
+        conn,
+        "SELECT (SELECT count(*) FROM precipitates), "
+        "(SELECT count(*) FROM failures WHERE death_reason NOT LIKE 'budget:%')",
+    ):
+        total = precip + merit_deaths
+        if total:
+            out.append(f"  base (all branches): {precip / total:.2f} ({precip}/{total})")
+
+    out.append("\nInstincts (synthesized + imported, by confidence):")
+    for name, confidence, evidence_n, origin in _rows(
+        conn,
+        "SELECT name, confidence, evidence_n, origin FROM instincts "
+        "ORDER BY confidence DESC, name LIMIT 6",
+    ):
+        out.append(f"  * {name} ({confidence:.2f}, n={evidence_n}, {origin})")
 
     conn.close()
     return "\n".join(out)

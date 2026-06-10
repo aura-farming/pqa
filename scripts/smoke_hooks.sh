@@ -16,4 +16,14 @@ echo '{"prompt":"implement a rate limiter"}' | python3 "$H/research_gate.py" >/d
 echo '{"cwd":"'"$PWD"'","tool_input":{"file_path":"README.md"}}' | python3 "$H/verify_loop.py"; check "verify_loop skips non-python" 0 $?
 echo '{"cwd":"'"$PWD"'","session_id":"s","transcript_path":"/nonexistent"}' | python3 "$H/precipitate_capture.py"; check "precipitate_capture never blocks" 0 $?
 
+# kill-switch contract: security hooks need the double opt-in; non-security a single flag
+PQA_DISABLED_HOOKS=security_gate PQA_ALLOW_UNSAFE=1 sh -c 'echo "{\"tool_input\":{\"command\":\"rm -rf /\"}}" | python3 "'"$H"'/security_gate.py"'; check "security_gate honours double opt-in" 0 $?
+PQA_DISABLED_HOOKS=security_gate sh -c 'echo "{\"tool_input\":{\"command\":\"rm -rf /\"}}" | python3 "'"$H"'/security_gate.py"'; check "security_gate ignores single flag (still blocks)" 2 $?
+PQA_DISABLED_HOOKS=research_gate sh -c 'echo "{\"prompt\":\"implement a rate limiter\"}" | python3 "'"$H"'/research_gate.py"'; check "research_gate disabled by single flag" 0 $?
+
+# secrets_guard: a dangling symlink (target removed) must fail closed, not slip through
+SLINK_DIR="$(mktemp -d)"; ln -s "$SLINK_DIR/gone" "$SLINK_DIR/looks_safe.txt"
+echo '{"tool_input":{"file_path":"'"$SLINK_DIR"'/looks_safe.txt"}}' | python3 "$H/secrets_guard.py"; check "secrets_guard blocks dangling symlink" 2 $?
+rm -rf "$SLINK_DIR"
+
 exit $fail

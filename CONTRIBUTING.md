@@ -150,22 +150,23 @@ A PR merges only when these CI jobs are green (draft PRs are skipped to save min
 
 | Path | What lives here |
 |------|-----------------|
-| [`pqa/`](pqa/) | The Python engine: `frame`, `superposition`, `collision`, `collapse`, `cost`, `memory`, `config`, `sanitize`, `divergence`, `orchestrator`, `report`, `signals`, `baseline`, `migrations`. Stdlib-only, strictly typed. This is what the verifier protects. |
+| [`pqa/`](pqa/) | The Python engine: `frame`, `superposition`, `collision`, `collapse`, `cost`, `memory`, `instincts`, `state`, `worktrees`, `config`, `sanitize`, `divergence`, `orchestrator`, `report`, `signals`, `baseline`, `migrations`. Stdlib-only, strictly typed. This is what the verifier protects. |
 | [`hooks/`](hooks/) | Claude Code hooks (stdlib-only). `research_gate`, `security_gate`, `secrets_guard`, `verify_loop`, `precipitate_capture`, plus the non-enforcing `update_check`. Wired in `hooks/hooks.json`. |
-| [`agents/`](agents/) | 34 subagent definitions (`*.md` with YAML frontmatter: `name`, `description`, `tools`, `model`). |
-| [`skills/`](skills/) | 59 skills, one directory each with a `SKILL`-style `*.md` (frontmatter: `name`, `description`). |
-| [`commands/`](commands/) | 27 slash commands (`*.md` with frontmatter: `description`, optional `argument-hint`; body uses `$ARGUMENTS`). |
+| [`agents/`](agents/) | 14 subagent definitions (`*.md` with YAML frontmatter: `name`, `description`, `tools`, `model`). |
+| [`skills/`](skills/) | 12 deep-playbook skills, one directory each with a `SKILL`-style `*.md` (frontmatter: `name`, `description`). |
+| [`commands/`](commands/) | 12 slash commands (`*.md` with frontmatter: `description`, optional `argument-hint`; body uses `$ARGUMENTS`). |
 | [`rules/`](rules/) | The PQA rule pack (the invariant, secrets discipline, git workflow, evidence-over-eloquence, hunt-the-unknown). |
 | [`tests/`](tests/) | pytest suite. New `pqa/` behaviour ships with tests here. |
-| [`scripts/`](scripts/) | Gate scripts (`check_invariant.py`, `smoke_hooks.sh`), the installer (`install.sh`), worktree tooling (`reconcile.sh`, `spawn_branches.sh`), and `generate_components.py`. |
+| [`scripts/`](scripts/) | Gate scripts (`check_invariant.py`, `smoke_hooks.sh`), the installer (`install.sh`), worktree thin-callers (`reconcile.sh`, `spawn_branches.sh` — the engine lifecycle lives in `pqa/worktrees.py`), `validate_components.py`, `eval_harness.py`, and `generate_config_doc.py`. |
 | [`.claude-plugin/`](.claude-plugin/) | `plugin.json` and `marketplace.json` manifests. |
 
-Many `agents/`, `skills/`, and `commands/` files are generated/catalogued via
-`scripts/generate_components.py`. If you add a component, follow the existing frontmatter shape
-exactly so the catalog and the plugin manifests stay valid.
+`agents/`, `skills/`, and `commands/` are validated (census, frontmatter, skill depth)
+by `scripts/validate_components.py`, which also drift-gates `docs/catalog.json`
+(`--write-catalog` regenerates it). If you add a component, follow the existing
+frontmatter shape exactly and re-run the validator.
 
 **Version drift:** `hooks/PQA_VERSION`, `pyproject.toml`, `.claude-plugin/plugin.json`, and
-`.claude-plugin/marketplace.json` must all agree on the version (currently `0.2.5`). The
+`.claude-plugin/marketplace.json` must all agree on the version (currently `0.3.0`). The
 `test_all_version_sources_agree` test in `tests/test_update_check.py` enforces this — bump them
 together.
 

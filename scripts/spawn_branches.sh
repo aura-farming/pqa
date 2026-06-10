@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
-# Spawn one git worktree per superposition branch on an ephemeral pqa/* branch.
-# Usage: scripts/spawn_branches.sh <run-id> <n>
+# Thin caller of the engine-owned lifecycle (pqa/worktrees.py): one git worktree per
+# superposition branch on an ephemeral pqa/* branch, write-ahead registered in
+# .pqa/state.json so strays survive even a mid-run SIGKILL (the old in-script trap
+# could not). Rollback-on-partial-failure lives in the engine now.
+# Usage: scripts/spawn_branches.sh <run-id> <n>      (run from the target repo root)
 set -euo pipefail
 RUN_ID="${1:?run id required}"
 N="${2:-3}"
-ROOT=".pqa_worktrees"
-mkdir -p "$ROOT"
-for i in $(seq 1 "$N"); do
-  BRANCH="pqa/${RUN_ID}-b${i}"
-  TREE="${ROOT}/${RUN_ID}-b${i}"
-  git worktree add -b "$BRANCH" "$TREE" HEAD >/dev/null
-  echo "$TREE"
-done
+PQA_SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PYTHONPATH="${PQA_SRC}${PYTHONPATH:+:${PYTHONPATH}}" exec python3 - "$RUN_ID" "$N" <<'PY'
+import sys
+
+from pqa.worktrees import spawn
+
+for tree in spawn(sys.argv[1], int(sys.argv[2])):
+    print(tree.path)
+PY

@@ -1,12 +1,12 @@
 """Superposition: spawn N branches with different topologies.
 
-Phase 0 — in-context branches. The orchestrator holds the Branch list, the generator
-writes into each branch's .output, and validate_divergence checks the populated outputs
-against pqa.divergence. No worktrees yet.
+Branches run in-context by default: the orchestrator holds the Branch list, the
+generator writes into each branch's .output, and validate_divergence checks the
+populated outputs against pqa.divergence.
 
-Phase 2 will swap the in-context implementation for git worktrees behind the same
-Branch / spawn / validate interface, so the orchestrator code does not change when we
-move from "branches share the working tree" to "branches each get their own worktree".
+In worktree mode (branches_mode="worktree") each Branch additionally carries the
+repo-relative path of its isolated git worktree in `.workdir` — pqa.worktrees owns
+that lifecycle; this module's spawn/validate interface is unchanged either way.
 
 The plan calls this "spawning" but actual generation happens elsewhere (subagent or
 direct model call) — this module produces the divergent prompts that go INTO generation
@@ -24,8 +24,9 @@ from pqa.frame import Disagreement
 
 @dataclass(frozen=True)
 class Branch:
-    """One branch in a superposition. Phase 0: the .output is filled in-context by the
-    generator; Phase 2: .output reflects what the worktree's generator wrote to disk."""
+    """One branch in a superposition. In-context mode: the .output is filled by the
+    generator; worktree mode: .output reflects what the generator wrote into the
+    isolated tree at .workdir."""
 
     id: str
     prompt: str
@@ -33,6 +34,7 @@ class Branch:
     conviction: str | None = None  # high/medium/low/None — telemetry only
     incremental: bool = True  # False = quantum-jump branch
     model: str = "claude-sonnet-4-6"
+    workdir: str | None = None  # worktree mode: repo-relative isolated tree path
 
 
 @dataclass(frozen=True)

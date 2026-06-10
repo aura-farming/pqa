@@ -9,9 +9,11 @@ Ties every Phase-0 module together into one runnable pass:
 
 Cost-governed throughout: every model call records into a CostGovernor, and the loop
 aborts cleanly (returning a partial RunReport) the moment the budget cap is crossed.
-Phase 0 runs branches sequentially in-context (no worktrees). Phase 2 will swap that
-for parallel worktree spawning behind the same Branch interface — this function does
-not change when that happens.
+Branches run sequentially in-context by default. In worktree mode the caller spawns
+isolated trees via pqa.worktrees and passes their paths as `workdirs`; each generator
+seed then carries its tree in Branch.workdir, and the verifier callable is expected
+to run the real suite inside that tree (true isolation). The loop itself is the same
+either way — the engine never shells out to git.
 
 Generators, adversaries, and verifiers are external callables (subagent / model / mock)
 because the orchestrator itself must stay deterministic and testable. Each callable
@@ -23,17 +25,34 @@ from __future__ import annotations
 
 import sqlite3
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from pqa.baseline import Baseline, Comparison, compare
 from pqa.collapse import BranchResult, CollapseOutcome, select_survivor
-from pqa.collision import Finding, score_all
+from pqa.collision import CollisionScore, Finding, score_all
 from pqa.cost import Budget, CostGovernor
 from pqa.divergence import DivergenceReport
 from pqa.frame import Frame, detect_disagreement, record_frame, update_resolved_by
-from pqa.memory import Failure, record_failure, record_precipitate
-from pqa.superposition import Branch, respawn_plan, spawn_prompts, validate_divergence
+from pqa.instincts import agrees
+from pqa.memory import (
+    SIGNAL_LEVELS,
+    Failure,
+    instinct_statement,
+    prior_art,
+    record_failure,
+    record_precipitate,
+    record_signal,
+    update_signal_outcome,
+)
+from pqa.signals import parse_conviction
+from pqa.superposition import (
+    Branch,
+    RespawnPlan,
+    respawn_plan,
+    spawn_prompts,
+    validate_divergence,
+)
 
 
 @dataclass(frozen=True)
@@ -106,12 +125,21 @@ class RunReport:
     abort_reason: str | None
     started_at: int
     finished_at: int
+    # Context-management telemetry (roadmap §4): which memories were injected at
+    # frame-load, and how many tokens each stage held in the orchestrator. Tuples
+    # for the same structural-immutability reason as `branches` above.
+    memories_injected: tuple[str, ...] = ()
+    context_tokens_per_stage: tuple[tuple[str, int], ...] = ()
+    spiral_depth: int = 0
+    # Roadmap §7.4: which instincts were injected at frame-load, and whether the
+    # winner agreed with each — instinct hit-rate accrues from these pairs.
+    instincts_injected: tuple[str, ...] = ()
+    instinct_agreement: tuple[tuple[str, bool], ...] = ()
 
 
-# Default model used to price generator/adversary/verifier calls. The fake test callables
-# don't care — they pass token counts directly. Real callables can override per-call when
-# the orchestrator wraps them.
-_DEFAULT_MODEL = "claude-sonnet-4-6"
+# Model identity flows from the caller: generators carry it on Branch.model and the
+# adversary's model is an explicit `run()` parameter. There is deliberately no module
+# default — a hardcoded constant here is how recorded spend drifts from real dispatch.
 
 
 def _aborted_report(
@@ -123,6 +151,7 @@ def _aborted_report(
     divergence: DivergenceReport | None,
     governor: CostGovernor,
     started_at: int,
+    memories: tuple[str, ...] = (),
 ) -> RunReport:
     return RunReport(
         task=task,
@@ -139,6 +168,8 @@ def _aborted_report(
         abort_reason=reason,
         started_at=started_at,
         finished_at=int(time.time()),
+        # Aborted runs are persisted and learned from, so they cite injections too.
+        memories_injected=memories,
     )
 
 
@@ -150,9 +181,11 @@ def _generate_all(
     generator: GeneratorFn,
     governor: CostGovernor,
     force_non_obvious: int | None,
+    workdirs: Sequence[str] | None = None,
 ) -> tuple[list[Branch], str | None]:
     """Spawn N prompts and generate each branch sequentially. Returns the branches plus
-    an abort reason string if the cost cap tripped mid-generation."""
+    an abort reason string if the cost cap tripped mid-generation. In worktree mode
+    each seed carries its isolated tree path so the generator writes real code there."""
     disagreement = detect_disagreement(research, selfeval)
     prompts = spawn_prompts(
         n,
@@ -162,13 +195,64 @@ def _generate_all(
     )
     branches: list[Branch] = []
     for i, prompt in enumerate(prompts):
-        seed = Branch(id=f"b{i}", prompt=prompt, incremental=(i != force_non_obvious))
+        seed = Branch(
+            id=f"b{i}",
+            prompt=prompt,
+            incremental=(i != force_non_obvious),
+            workdir=None if workdirs is None else workdirs[i],
+        )
         populated, in_tok, out_tok = generator(seed)
         governor.record(populated.id, populated.model, in_tok, out_tok)
         branches.append(populated)
         if governor.should_abort():
             return branches, "cost budget exceeded during generation"
     return branches, None
+
+
+def _respawn_similar(
+    branches: list[Branch],
+    pair: tuple[int, int],
+    generator: GeneratorFn,
+    governor: CostGovernor,
+    force_non_obvious: int | None,
+) -> tuple[list[Branch], DivergenceReport, RespawnPlan, str | None]:
+    """Honor a respawn-pair plan: regenerate one of the too-similar pair under a
+    stronger P_reframe, then re-validate. One retry only — if low variance persists,
+    proceed flagged rather than loop (a task that pulls every branch to one shape
+    should not buy unbounded regeneration). Never respawns the forced non-obvious
+    branch: it is the diversity guarantee."""
+    i, j = pair
+    victim = j if j != force_non_obvious else i
+    old = branches[victim]
+    reprompt = (
+        f"{old.prompt}\n\nP_reframe (STRONGER): your previous attempt converged with a "
+        "sibling branch. Refuse that shape entirely — change the topology, not the "
+        "wording. If the obvious answer is X, build the best non-X."
+    )
+    # The respawned branch reuses its worktree: same isolated tree, new topology.
+    seed = Branch(
+        id=old.id,
+        prompt=reprompt,
+        incremental=old.incremental,
+        model=old.model,
+        workdir=old.workdir,
+    )
+    populated, in_tok, out_tok = generator(seed)
+    governor.record(populated.id, populated.model, in_tok, out_tok)
+    if governor.should_abort():
+        report = validate_divergence(branches)
+        plan = RespawnPlan(action="abort", pair_indices=pair, reason="budget hit during respawn")
+        return branches, report, plan, "cost budget exceeded during respawn"
+    redone = [populated if b.id == old.id else b for b in branches]
+    divergence = validate_divergence(redone)
+    new_plan = respawn_plan(divergence)
+    if new_plan.action == "respawn-pair":
+        new_plan = RespawnPlan(
+            action="proceed",
+            pair_indices=new_plan.pair_indices,
+            reason="low variance persisted after one respawn; proceeding flagged",
+        )
+    return redone, divergence, new_plan, None
 
 
 def _resolved_view(survivor: Branch, branches: list[Branch]) -> str:
@@ -194,17 +278,60 @@ def run(
     baseline: Baseline | None = None,
     force_non_obvious: int | None = None,
     checkpoints: HumanCheckpoints | None = None,
+    adversary_model: str = "claude-opus-4-8",
+    injected_memory_ids: tuple[str, ...] = (),
+    spiral_depth: int = 0,
+    max_spiral_depth: int = 1,
+    prior_art_token_budget: int = 400,
+    workdirs: Sequence[str] | None = None,
 ) -> RunReport:
     """One PQA run, end-to-end.
 
     Returns a RunReport regardless of outcome — even an aborted run produces a report
     with `aborted=True` and the cost-governor snapshot, so the caller can persist it
     and learn from it.
+
+    The frame step queries memory itself (roadmap §4.3.3): top-k relevant failures and
+    precipitates are injected into the generation prompt under a hard token budget
+    (`prior_art_token_budget`, 0 disables), and every injected memory id is reported in
+    `memories_injected` alongside any ids the caller injected out-of-band.
+
+    `workdirs` (worktree mode, roadmap §9): one isolated tree path per branch, spawned
+    by the caller via pqa.worktrees and threaded onto each generator seed's
+    Branch.workdir. The caller's generator/verifier callables are responsible for
+    writing and verifying inside those trees.
     """
+    if workdirs is not None and len(workdirs) != n_branches:
+        raise ValueError(
+            f"workdirs must have exactly n_branches={n_branches} entries, got {len(workdirs)}"
+        )
     started_at = int(time.time())
     governor = CostGovernor(budget)
 
+    # ---- 0. Spiral guard -----------------------------------------------------
+    # Spirals re-enter the full loop; without a depth cap the only brake is the
+    # budget, and a brake is not a steering wheel.
+    if spiral_depth > max_spiral_depth:
+        return _aborted_report(
+            task,
+            session_id,
+            f"spiral depth {spiral_depth} exceeds max_spiral_depth={max_spiral_depth}",
+            [],
+            [],
+            None,
+            governor,
+            started_at,
+        )
+
     # ---- 1. Frame collision ------------------------------------------------
+    # The frame step performs the memory query itself — retrieval by relevance,
+    # bounded by a hard token budget, with every injected id reported so the run
+    # report can name what influenced the run.
+    art = prior_art(conn, task, max_tokens=prior_art_token_budget)
+    memories = injected_memory_ids + art.ids
+    instinct_ids = tuple(i for i in art.ids if i.startswith("instinct:"))
+    prompt = f"{base_prompt}\n\n{art.text}" if art.ids else base_prompt
+
     disagreement = detect_disagreement(research, selfeval)
 
     # Human-in-the-loop perturbation point: the operator can abort here if the
@@ -223,20 +350,46 @@ def run(
                 None,
                 governor,
                 started_at,
+                memories,
             )
 
     frame_id = record_frame(conn, session_id, task, research, selfeval, disagreement)
 
     # ---- 2. Spawn + generate ----------------------------------------------
     branches, abort = _generate_all(
-        n_branches, base_prompt, research, selfeval, generator, governor, force_non_obvious
+        n_branches,
+        prompt,
+        research,
+        selfeval,
+        generator,
+        governor,
+        force_non_obvious,
+        workdirs,
     )
     if abort:
-        return _aborted_report(task, session_id, abort, branches, [], None, governor, started_at)
+        return _aborted_report(
+            task, session_id, abort, branches, [], None, governor, started_at, memories
+        )
 
     # ---- 3. Divergence gate ------------------------------------------------
     divergence = validate_divergence(branches)
     plan = respawn_plan(divergence)
+    if plan.action == "respawn-pair" and plan.pair_indices is not None:
+        branches, divergence, plan, respawn_abort = _respawn_similar(
+            branches, plan.pair_indices, generator, governor, force_non_obvious
+        )
+        if respawn_abort:
+            return _aborted_report(
+                task,
+                session_id,
+                respawn_abort,
+                branches,
+                [],
+                divergence,
+                governor,
+                started_at,
+                memories,
+            )
     if plan.action == "abort":
         return _aborted_report(
             task,
@@ -247,11 +400,12 @@ def run(
             divergence,
             governor,
             started_at,
+            memories,
         )
 
     # ---- 4. Adversary ------------------------------------------------------
     findings, adv_in, adv_out = adversary(branches)
-    governor.record("adversary", _DEFAULT_MODEL, adv_in, adv_out)
+    governor.record("adversary", adversary_model, adv_in, adv_out)
     if governor.should_abort():
         return _aborted_report(
             task,
@@ -262,6 +416,7 @@ def run(
             divergence,
             governor,
             started_at,
+            memories,
         )
     scores = score_all(findings, branch_ids=[b.id for b in branches])
 
@@ -308,6 +463,7 @@ def run(
                 divergence,
                 governor,
                 started_at,
+                memories,
             )
 
     # ---- 7. Collapse -------------------------------------------------------
@@ -356,6 +512,10 @@ def run(
                 ),
             )
 
+    # ---- 9. Conviction outcomes + instinct hit-rate (roadmap §7) ----------
+    survivor_name = None if outcome.survivor is None else outcome.survivor.name
+    _record_signal_outcomes(conn, session_id, branches, scores, verify_results, survivor_name)
+
     finished_at = int(time.time())
     return RunReport(
         task=task,
@@ -372,6 +532,10 @@ def run(
         abort_reason=None,
         started_at=started_at,
         finished_at=finished_at,
+        memories_injected=memories,
+        spiral_depth=spiral_depth,
+        instincts_injected=instinct_ids,
+        instinct_agreement=_instinct_agreement(conn, instinct_ids, survivor_branch),
     )
 
 
@@ -388,3 +552,47 @@ def _death_reason(br: BranchResult, findings: list[Finding]) -> str:
     if not br.verified:
         return "failed verification"
     return "outranked by survivor"
+
+
+def _record_signal_outcomes(
+    conn: sqlite3.Connection,
+    session_id: str,
+    branches: list[Branch],
+    scores: dict[str, CollisionScore],
+    verify_results: dict[str, VerifyResult],
+    survivor_name: str | None,
+) -> None:
+    """Roadmap §7.1: every conviction-flagged branch leaves a signal row WITH its
+    outcome — survived the collision, passed the verifier, won the collapse. A
+    finished run must never leave its own signals pending."""
+    for b in branches:
+        conviction = parse_conviction(b.output)
+        level = conviction.level if conviction else b.conviction
+        if level not in SIGNAL_LEVELS:
+            continue
+        basis = conviction.basis if conviction else "(basis not stated)"
+        signal_id = record_signal(conn, session_id, level, basis, branch=b.id)
+        update_signal_outcome(
+            conn,
+            signal_id,
+            survived=scores[b.id].survives,
+            verified=verify_results[b.id].verified,
+            won=(b.id == survivor_name),
+        )
+
+
+def _instinct_agreement(
+    conn: sqlite3.Connection,
+    instinct_ids: tuple[str, ...],
+    survivor: Branch | None,
+) -> tuple[tuple[str, bool], ...]:
+    """Instinct hit-rate telemetry: did the winner agree with each injected instinct?
+    No survivor → everything counts as disagreed."""
+    pairs: list[tuple[str, bool]] = []
+    for memory_id in instinct_ids:
+        statement = instinct_statement(conn, int(memory_id.split(":", 1)[1]))
+        agreed = (
+            survivor is not None and statement is not None and agrees(statement, survivor.output)
+        )
+        pairs.append((memory_id, agreed))
+    return tuple(pairs)

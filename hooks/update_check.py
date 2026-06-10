@@ -21,12 +21,15 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import sys
 import time
 import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
+
+from hook_common import is_disabled
 
 REPO = "aura-farming/pqa"
 LATEST_RELEASE_URL = f"https://api.github.com/repos/{REPO}/releases/latest"
@@ -121,10 +124,14 @@ def _read_fresh_cache(cache_path: Path, now: float) -> str | None:
 
 
 def _write_cache(cache_path: Path, latest: str, now: float) -> None:
-    # cache is best-effort; a write failure just means we re-check next session
+    # Best-effort AND atomic: concurrent Claude Code sessions race on this global
+    # cache file; write-to-tmp + os.replace keeps readers from ever seeing a torn
+    # JSON document. A write failure just means we re-check next session.
     with contextlib.suppress(OSError):
         cache_path.parent.mkdir(parents=True, exist_ok=True)
-        cache_path.write_text(json.dumps({"checked_at": now, "latest": latest}), encoding="utf-8")
+        tmp = cache_path.with_suffix(f".tmp.{os.getpid()}")
+        tmp.write_text(json.dumps({"checked_at": now, "latest": latest}), encoding="utf-8")
+        tmp.replace(cache_path)  # atomic rename; Path.replace wraps os.replace
 
 
 def latest_version(
@@ -142,6 +149,8 @@ def latest_version(
 
 
 def main() -> int:
+    if is_disabled("update_check"):
+        return 0
     with contextlib.suppress(OSError):
         sys.stdin.read()  # drain the SessionStart payload; we don't need it
     installed = read_installed_version(Path(__file__).resolve().parent / "PQA_VERSION")

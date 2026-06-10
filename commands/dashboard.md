@@ -1,8 +1,13 @@
 ---
-description: Render the accumulating PQA moat via scripts/dashboard.py — precipitates, failure taxonomy, conviction calibration....
+description: Render the moat dashboard — precipitates, taxonomy, calibration.
 ---
 
-Render the accumulating PQA moat via scripts/dashboard.py — precipitates, failure taxonomy, conviction calibration. Stdlib CLI, no GUI deps.
+Render the accumulated learning (read-only, no model call):
 
-Hold the PQA invariant throughout: evidence over eloquence, the verifier is the source of
-truth, and conviction protects exploration without exempting it from verification.
+```bash
+python3 scripts/dashboard.py
+```
+
+Show the output as-is. If the operator asks what it *means* (calibration
+interpretation, blind-spot analysis), dispatch `pqa-self-reflector` via Task — that
+is its job, not yours.

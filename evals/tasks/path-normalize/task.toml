@@ -1,0 +1,4 @@
+name = "path-normalize"
+entry = "safe_join"
+prompt = "Implement safe_join(root: str, user_path: str) -> str | None: join an untrusted relative path onto root and return the normalized absolute path, or None if the result would escape root (path traversal)."
+trap = "prefix-string checks pass /srv/app-evil for root /srv/app; and ../ segments must be resolved before judging containment."

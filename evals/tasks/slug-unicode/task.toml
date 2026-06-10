@@ -1,0 +1,4 @@
+name = "slug-unicode"
+entry = "slugify"
+prompt = "Implement slugify(title: str) -> str: NFKD-normalize, strip combining marks (diacritics fold to ASCII), lowercase, replace every non-alphanumeric run with one hyphen, trim leading/trailing hyphens."
+trap = "dropping non-ASCII without NFKD turns 'Café' into 'caf'; separator runs must collapse to a single hyphen."

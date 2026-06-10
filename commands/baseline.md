@@ -1,9 +1,13 @@
 ---
-description: Produce the single-pass baseline via pqa-baseline-runner and store it for the side-by-side, so the loop's result can...
+description: Record the honest single-pass baseline for a task.
 argument-hint: <task>
 ---
 
-Produce the single-pass baseline via pqa-baseline-runner and store it for the side-by-side, so the loop's result can be measured against one shot. Task: $ARGUMENTS
+The control arm: one single-pass attempt, no loop, recorded for the side-by-side.
 
-Hold the PQA invariant throughout: evidence over eloquence, the verifier is the source of
-truth, and conviction protects exploration without exempting it from verification.
+Dispatch `pqa-baseline-runner` via Task on: `$ARGUMENTS`. It solves the task in one
+pass (same model the PQA generators use — a fair control), runs the test suite once,
+writes its solution under `.pqa/baseline/`, and records the row via
+`pqa.baseline.record_baseline`.
+
+Report: pass/fail, coverage, tokens used, and where the solution was written.

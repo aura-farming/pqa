@@ -21,6 +21,8 @@ import sys
 from pathlib import Path
 from typing import Any, cast
 
+from hook_common import disable_hint, is_disabled
+
 SECRET_PATHS = re.compile(
     r"(^|/)(\.env(\.(?!example\b|sample\b|template\b|dist\b)[a-z0-9_-]+|$)|"
     r"id_rsa|id_ed25519|.*\.pem|.*\.key|credentials|\.netrc|"
@@ -107,7 +109,28 @@ def _normalised_candidates(raw_path: str) -> list[str]:
     return candidates
 
 
+def _unresolvable_symlink(p: Path) -> bool:
+    """Fail closed on symlinks that cannot be resolved (loops, vanished targets).
+    Previously this degraded to raw-string matching only — a benign-named link at
+    a secret could ride through the OSError path. Single-type except clauses by
+    design (ruff-format tuple gotcha; see CONTRIBUTING)."""
+    try:
+        if not p.is_symlink():
+            return False
+    except OSError:
+        return False
+    try:
+        p.resolve(strict=True)
+    except OSError:
+        return True
+    except RuntimeError:
+        return True
+    return False
+
+
 def main() -> int:
+    if is_disabled("secrets_guard"):
+        return 0  # requires PQA_DISABLED_HOOKS=secrets_guard AND PQA_ALLOW_UNSAFE=1
     payload = read_payload()
     if payload is None:
         sys.stderr.write(
@@ -127,8 +150,18 @@ def main() -> int:
                 + ". Subagents must never load secret material into a prompt or a branch. "
                 "Reference secrets via environment variables at runtime instead; never read "
                 "the file directly.\n"
+                f"{disable_hint('secrets_guard')}\n"
             )
             return 2
+
+    if _unresolvable_symlink(Path(raw)):
+        sys.stderr.write(
+            f"PQA secrets guard blocked a read of '{raw}': it is a symlink whose target "
+            "cannot be resolved — exactly the shape used to smuggle a secret past a "
+            "path check. Read the real target directly if it is legitimate.\n"
+            f"{disable_hint('secrets_guard')}\n"
+        )
+        return 2
 
     return 0
 
