@@ -20,10 +20,10 @@ made against the current minor line and shipped as point releases.
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.2.x   | Yes (current line) |
-| < 0.2   | No                 |
+| 0.3.x   | Yes (current line) |
+| < 0.3   | No                 |
 
-The installed version is recorded in `hooks/PQA_VERSION` (currently `0.2.5`)
+The installed version is recorded in `hooks/PQA_VERSION` (currently `0.3.0`)
 and kept in lockstep with `pyproject.toml` and both plugin manifests
 (`.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`); a CI test
 fails the build if they drift. Always report against the version shown in

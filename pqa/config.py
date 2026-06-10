@@ -22,8 +22,10 @@ from __future__ import annotations
 import math
 import os
 import tomllib
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import Final, cast
 
 from pqa.cost import resolve_model
@@ -74,6 +76,64 @@ _ENV_MAP: Final[dict[str, str]] = {
     "PQA_BRANCHES_MODE": "branches_mode",
     "PQA_MEMORY_DB": "memory_db",
 }
+
+# Per-key effect docs — the single prose source for docs/configuration.md, which
+# scripts/generate_config_doc.py renders and tests/test_config_doc.py pins (keys
+# here must equal _KNOWN_KEYS exactly). Constraint sentences mirror the validators
+# below; change both together.
+_KEY_DOCS: Final[dict[str, str]] = {
+    "branches": (
+        "How many divergent solutions one run holds in superposition. More branches "
+        "buy more exploration and more spend; the divergence gate kills lookalikes "
+        "either way. Must be >= 1."
+    ),
+    "verify_tests": (
+        "When true, the verify_loop hook runs the test suite after every edit on top "
+        "of its default lint check — a per-session belt for high-stakes work. The "
+        "binding merge-time guarantee stays in CI regardless."
+    ),
+    "model": (
+        "Operator model preference as a short alias; `PQAConfig.resolved_model()` "
+        "translates it to the concrete dispatch/pricing id via "
+        "`pqa.cost.resolve_model`. The orchestrator routes models per role — "
+        "quality-critical roles run Fable 5; mechanical tiers run cheaper models."
+    ),
+    "run_budget_usd": (
+        "Secondary spend cap and display currency. The cost governor aborts the run "
+        "cleanly (partial RunReport, spend snapshot) the moment a cap is crossed. "
+        "Must be a finite number > 0."
+    ),
+    "run_budget_tokens": (
+        "PRIMARY spend ledger: tokens are counted before USD. Sized so a routed N=3 "
+        "run completes with headroom. Must be >= 10000 — a full run cannot fit in "
+        "less."
+    ),
+    "max_spiral_depth": (
+        "How many times a finished run may re-enter the loop on its own result "
+        "(/spiral). 0 disables spirals; the cap exists because a budget is a brake, "
+        "not a steering wheel. Must be in [0, 5]."
+    ),
+    "branches_mode": (
+        "`context`: branches run in-context, sequentially (works anywhere, no git "
+        "needed). `worktree`: one isolated git worktree per branch on an ephemeral "
+        "`pqa/<run>-bN` branch (pqa.worktrees), with a write-ahead registry in "
+        "`.pqa/state.json` for crash-safe cleanup and true verifier isolation."
+    ),
+    "memory_db": (
+        "SQLite path for the continuous-learning store (precipitates, failures, "
+        "signals, frames, instincts). Created on first use via the migration "
+        "runner. Paths resolving into system directories are refused."
+    ),
+}
+
+# Read-only public views for doc tooling: scripts/generate_config_doc.py renders
+# docs/configuration.md from these and tests/test_config_doc.py pins the output.
+# The underscore originals stay loader-private; proxies make mutation impossible.
+DEFAULTS: Final[Mapping[str, int | bool | str | float]] = MappingProxyType(_DEFAULTS)
+ENV_MAP: Final[Mapping[str, str]] = MappingProxyType(_ENV_MAP)
+KEY_DOCS: Final[Mapping[str, str]] = MappingProxyType(_KEY_DOCS)
+VALID_MODELS: Final[frozenset[str]] = _VALID_MODELS
+VALID_BRANCHES_MODES: Final[frozenset[str]] = _VALID_BRANCHES_MODES
 
 
 @dataclass(frozen=True, slots=True)

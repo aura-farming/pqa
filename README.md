@@ -12,7 +12,8 @@ most-probable completion is never the default winner.
 
 `superposition → collision → collapse` is best-of-*N* with **enforced diversity**,
 **adversarial critique**, and **verification-gated selection**. It's a Claude Code plugin;
-it runs on your subscription (every agent on Opus), no API key.
+it runs on your subscription, no API key. Models are routed per role — Fable 5 where
+output quality is decided (generation, attack, judging), cheaper tiers for mechanics.
 
 ```text
 /plugin marketplace add aura-farming/pqa
@@ -65,7 +66,9 @@ flowchart LR
 | **Collapse** | The verifier runs the real tests/types/lint. The survivor passes verification and resolves the most findings; ties break toward the less incremental branch. |
 | **Precipitate** | Name the winner and why it won; record each dead branch and why it died — so the next run's frames are sharper. |
 
-`/pqa <task>` runs the whole loop; `/frame → /superpose → /collapse → /precipitate` steps through it.
+`/pqa <task>` runs all five stages, scaled to the ask (`--resume` re-enters a crashed
+run at its first incomplete stage); `/attack` and `/verify` run the collision and
+verification gates standalone.
 
 ## Measure it yourself
 
@@ -87,14 +90,18 @@ doesn't beat single-pass on your work, the harness will show you.
 
 Run it yourself: `/eval` (both arms, full set, real model spend) or
 `python3 scripts/eval_harness.py smoke --all` (verifier integrity only, zero model
-calls). First published live results land here with the 0.3.0 release — losses included.
+calls). First published live results land here after the first full live `/eval`
+run — losses included; until then this section carries methodology, not numbers.
 
 ## What's in the box
 
-- **34 agents · 59 skills · 27 commands** — purpose-built for the loop, not a generic pack.
-- **Five enforcing hooks** (research gate, security gate, secrets guard, verify loop,
-  precipitate capture) that keep autonomous *auto mode* safe: they block dangerous ops
-  even when permission prompts are off.
+- **14 agents · 12 commands · 12 skills** — each skill a deep playbook, purpose-built
+  for the loop, not a generic pack (`docs/catalog.json` is drift-gated against disk).
+- **Five hooks, honestly described**: the two security hooks (security gate, secrets
+  guard) hard-block dangerous ops with exit 2 even when permission prompts are off;
+  verify-loop feeds lint/test failures back after every edit; the research gate and
+  precipitate capture are advisory and fail open. The binding merge-time guarantee
+  lives in CI, not in hooks.
 - **Continuous learning** — named precipitates persist across runs; instincts export and
   import across people (`/instinct-export`, `/instinct-import`).
 - **Update notice** at session start when a newer release is out.
@@ -120,17 +127,23 @@ Then run `/pqa <task>`. No API key — PQA uses your Claude Code subscription.
 Settings come from `pqa-config.toml` and/or `PQA_*` environment variables (precedence:
 **env > TOML > defaults**). The loader is stdlib-only (`tomllib`), strictly typed, and
 rejects wrong-typed values, unknown keys, non-finite budgets, and `memory_db` paths into
-system directories. See [`pqa-config.example.toml`](pqa-config.example.toml).
+system directories. Every key, default, env var, and effect is in the generated
+[configuration reference](docs/configuration.md); see also
+[`pqa-config.example.toml`](pqa-config.example.toml).
 
 ## Built with · status
 
 Python 3.14 stdlib-only core · `uv` · `ruff` · `pyright --strict` · `pytest` + mutation
-testing as the collapse gate · SQLite for memory · four CI workflows.
+testing as the collapse gate · SQLite for memory · five CI workflows (lint/tests,
+security, invariant, mutation, nightly eval-smoke).
 
-**Phase 0.** The engine — frame, superpose, collide, collapse, precipitate, the cost
-governor, and the memory store — is implemented and CI-gated: 300+ tests, 95%+ coverage,
-the verifier-invariant gate and hook smoke tests green. Branches currently run in-context
-and sequentially; **next** is true git-worktree parallelization behind the same interface.
+**Status.** The engine — frame, superpose, collide, collapse, precipitate, cost
+governor, memory, instincts, run journal — is implemented and CI-gated: 576 tests,
+~95% coverage measured (CI enforces an 80% floor), verifier-invariant gate and hook
+smoke tests green. **Worktree Phase 1 is shipped**: `branches_mode = "worktree"` gives
+each branch an isolated git worktree on an ephemeral `pqa/*` branch, with a crash-safe
+registry, rollback on partial spawn, and zero-orphan reconcile (`pqa/worktrees.py`);
+in-context mode remains the default and needs no git.
 
 ## Updating
 

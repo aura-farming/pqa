@@ -3,32 +3,53 @@
 # Precedence is env > TOML > built-in defaults. PQA_* environment variables
 # always win over what's in this file. Every key in the [pqa] table is
 # strictly typed and validated at load time — wrong types, unknown keys,
-# missing files, and non-finite floats all raise. See `pqa/config.py`.
+# missing files, and non-finite floats all raise. See `pqa/config.py`, or the
+# generated reference in `docs/configuration.md`.
 
 [pqa]
 
 # Number of divergent branches per superposition. Must be a positive integer.
 # 3 is the recommended default (research + self-eval + forced non-obvious).
+# Env: PQA_BRANCHES.
 branches = 3
 
-# Whether the post-edit verifier hook runs the full test suite. Default is
-# false (lint-only, fast). Set to true for collapse phases where you want
-# the tests to gate every edit. The env equivalent is PQA_VERIFY_TESTS=1.
+# Whether the post-edit verify_loop hook runs the full test suite on top of
+# its default lint check. Default false (lint-only, fast); set true for
+# high-stakes sessions. Env: PQA_VERIFY_TESTS=1.
 verify_tests = false
 
-# Model name passed to subagents. Must be one of "opus", "sonnet", or
-# "haiku" — any other value is rejected at load time by the config loader.
-# PQA defaults to "opus" because every agent runs
-# on the strongest available model by design.
-model = "opus"
+# Operator model preference as a short alias: "fable", "opus", "sonnet", or
+# "haiku" — anything else is rejected at load time. Default "fable": the
+# orchestrator routes models per role, with Fable 5 exactly where output
+# quality is decided and cheaper tiers for mechanics. Env: PQA_MODEL.
+model = "fable"
 
-# Hard USD cap for one PQA run. Must be a finite positive float. Inf/nan
-# and non-positive values are rejected at load time so the cost-tracker
-# budget gate cannot be bypassed by misconfiguration.
-run_budget_usd = 15.0
+# Hard USD cap for one PQA run — the SECONDARY cap and display currency
+# (tokens are the primary ledger, below). Must be a finite positive float;
+# inf/nan and non-positive values are rejected so the cost-governor gate
+# cannot be bypassed by misconfiguration. Env: PQA_RUN_BUDGET_USD.
+run_budget_usd = 5.0
 
-# Path to the sqlite memory database that holds frames, precipitates, and
-# failure taxonomies across sessions. Paths into system directories
-# (/etc, /usr, /var, /sys, /proc, /dev, /boot, /root, /bin, /sbin, /lib,
-# /lib64, /System) are rejected to prevent accidental writes there.
+# Hard token cap for one PQA run — the PRIMARY spend ledger. Sized so a
+# routed N=3 run completes with headroom. Must be >= 10000. Env:
+# PQA_RUN_BUDGET_TOKENS.
+run_budget_tokens = 800000
+
+# How many times a finished run may re-enter the loop on its own result
+# (the spiral). 0 disables spirals; max 5 — a budget is a brake, not a
+# steering wheel. Env: PQA_MAX_SPIRAL_DEPTH.
+max_spiral_depth = 1
+
+# Branch execution mode. "context": branches run in-context, sequentially —
+# works anywhere, no git needed. "worktree": one isolated git worktree per
+# branch on an ephemeral pqa/<run>-bN branch (pqa/worktrees.py), with a
+# write-ahead registry in .pqa/state.json for crash-safe cleanup and true
+# verifier isolation. Env: PQA_BRANCHES_MODE.
+branches_mode = "context"
+
+# Path to the sqlite memory database that holds frames, precipitates,
+# failures, signals, and instincts across sessions. Paths into system
+# directories (/etc, /usr, /var, /sys, /proc, /dev, /boot, /root, /bin,
+# /sbin, /lib, /lib64, /System) are rejected to prevent accidental writes
+# there. Env: PQA_MEMORY_DB.
 memory_db = ".claude/hooks/memory/pqa_memory.db"
