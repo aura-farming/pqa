@@ -18,6 +18,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 LOOP = "frame -> superpose -> collide -> collapse -> precipitate"
 
+# Components that have graduated to hand-written (roadmap §6.1). The generator must
+# NEVER overwrite these — their content is the product, not a stamped template.
+# Phase 3a inverts this whole script into a validator; until then this set is the
+# only thing standing between a stray `python scripts/generate_components.py` and
+# the loss of hand-authored agents/commands.
+HANDWRITTEN: set[tuple[str, str]] = {
+    ("agents", "pqa-orchestrator"),
+    ("commands", "pqa"),
+}
+
 # ============================================================================
 # AGENTS  — role in the loop. (name, tools, role, fit, output)
 # ============================================================================
@@ -857,9 +867,13 @@ persuasive rationale substitute for a passing test.
 def write_all() -> dict[str, int]:
     counts: dict[str, int] = {}
     for a in AGENTS:
+        if ("agents", a["name"]) in HANDWRITTEN:
+            continue  # hand-written content is the product — never stamp over it
         (ROOT / "agents" / f"{a['name']}.md").write_text(render_agent(a))
     counts["agents"] = len(AGENTS)
     for c in COMMANDS:
+        if ("commands", c["name"]) in HANDWRITTEN:
+            continue
         (ROOT / "commands" / f"{c['name']}.md").write_text(render_command(c))
     counts["commands"] = len(COMMANDS)
     for s in SKILLS:
