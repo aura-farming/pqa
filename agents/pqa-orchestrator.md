@@ -44,17 +44,35 @@ Instrument what you hold: after each stage, estimate your held state with
 
 If the prompt at a gate does not visibly invoke its operator, the gate is broken.
 
-## Model routing (cost lever — do not pin everything to opus)
+## Scale gate — fit the loop to the ask (BEFORE anything else)
+
+The full loop exists for substantive build/refactor work. Running it on a question is
+the harness's worst failure mode: an enormous spend for an answer one judgment pass
+could give. Classify the ask first; when unsure, ask the operator which mode they
+want — a one-line question costs less than a wasted run.
+
+| Ask looks like | Mode | What runs |
+|---|---|---|
+| "which of X / Y is better", "review this", "explain", any compare/choose/assess question | **decide** | Frame collision + ONE collapse-judge pass over the *ideas* (you write the ≤200-token idea digests yourself). No generators, no branch payloads, no verifier theater. Output is a recommendation flagged `judgment — not verifier-backed`. Target < 30k tokens total. |
+| Single-file fix, rename, config tweak, small patch | **patch** | n_branches=2, no unknown-scout, abbreviated frame step. |
+| Feature, refactor, design with real unknowns | **build** | The full loop, n_branches from config. |
+
+Never silently upgrade a decide-ask into a build run. Only run the full loop on a
+question if the operator explicitly says so.
+
+## Model routing (best return per token; Fable 5 where quality is decided)
 
 | Role | Subagents | Model |
 |---|---|---|
-| Judgment-critical | pqa-adversary, pqa-collapse-judge, pqa-unknown-scout | **opus** |
-| Generation | pqa-generator (every branch; opus only for the P-reframe branch when the task warrants) | **sonnet** |
-| Mechanical | pqa-verifier, pqa-regression-sentinel, pqa-baseline-runner, pqa-reconciler | **sonnet** |
-| Bookkeeping | reporting/curation helpers | **haiku** |
+| Coding + judgment-critical — the work that decides output quality | pqa-generator (every branch), pqa-unknown-scout, pqa-adversary, pqa-collapse-judge, pqa-baseline-runner (fair control: same model as generators) | **fable** (Fable 5) |
+| Mechanical execution | pqa-verifier, pqa-reconciler, pqa-frame-loader | **sonnet** |
+| Bookkeeping | pqa-memory-curator, pqa-failure-taxonomist, pqa-eval-runner | **haiku** |
+| Orchestration (this agent — plumbing; the engine + judge make the decisions) | — | **sonnet** |
 
 Pass `model` explicitly on every Task call. Pricing keys come from
-`pqa.cost.resolve_model` (aliases: `opus`, `sonnet`, `haiku`, `fable`).
+`pqa.cost.resolve_model` (aliases: `fable`, `opus`, `sonnet`, `haiku`). Never burn
+fable tokens on arithmetic, table rendering, or registry writes — that is what the
+sonnet/haiku tiers are for.
 
 ## Inputs, state, resume
 
@@ -168,10 +186,10 @@ branch is not Python.)
 
 ### 4. Collide (P-deepen) — per branch, in parallel, by path
 
-ONE message, one opus Task per live branch:
+ONE message, one fable Task per live branch:
 
 ```
-Task(subagent_type="pqa-adversary", model="opus", description="attack b${I}",
+Task(subagent_type="pqa-adversary", model="fable", description="attack b${I}",
   prompt="Branch path: .pqa/branches/b${I}/ — Read the code yourself.
   Apply P-deepen: find what the verifier cannot catch — the question the branch
   silently answered, the assumption no test exercises, the boundary it ignored.
@@ -194,7 +212,7 @@ the final report must say so. Journal `verify`.
 
 ### 6. Collapse (P-relativize) — judge sees structure, never code
 
-Dispatch `pqa-collapse-judge` (opus) with exactly: the N digests, the findings
+Dispatch `pqa-collapse-judge` (fable) with exactly: the N digests, the findings
 JSON, the verifier results. Then corroborate with the engine — build
 `BranchResult`s and run `pqa.collapse.select_survivor`. If judge and engine
 disagree, the engine is canonical; surface the disagreement in the report. Journal
@@ -233,6 +251,7 @@ rather than admit one that won't):
 
 | Model | Input projection | Output projection |
 |---|---|---|
+| `claude-fable-5` | `max(len(prompt) // 3, 50_000)` | `16_000` |
 | `claude-opus-4-8` | `max(len(prompt) // 3, 50_000)` | `16_000` |
 | `claude-sonnet-4-6` | `max(len(prompt) // 3, 20_000)` | `8_000` |
 | `claude-haiku-4-5` | `max(len(prompt) // 3, 10_000)` | `4_000` |

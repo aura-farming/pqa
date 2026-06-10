@@ -35,7 +35,10 @@ from pqa.cost import resolve_model
 _DEFAULTS: Final[dict[str, int | bool | str | float]] = {
     "branches": 3,
     "verify_tests": False,
-    "model": "opus",
+    # Fable 5 by default: the model that does the actual coding and quality-critical
+    # judgment. Cheaper models are routed per-role by the orchestrator where the
+    # returns justify it (operator directive 2026-06-10).
+    "model": "fable",
     # Budget defaults are sized so a routed N=3 run (see the orchestrator's model
     # routing table) completes with headroom. Tokens are the PRIMARY ledger; USD is
     # the secondary cap and display currency. One source of truth: the orchestrator

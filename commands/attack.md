@@ -1,8 +1,14 @@
 ---
-description: Run pqa-adversary (and pqa-security-adversary where relevant) on the current code standalone — find where it breaks...
+description: Run the adversary standalone against current code or a path.
+argument-hint: [path]
 ---
 
-Run pqa-adversary (and pqa-security-adversary where relevant) on the current code standalone — find where it breaks without fixing it.
+Adversarial collision, standalone — no full loop, one attack pass.
 
-Hold the PQA invariant throughout: evidence over eloquence, the verifier is the source of
-truth, and conviction protects exploration without exempting it from verification.
+Dispatch `pqa-adversary` via Task on the target (default: the working tree's recent
+changes; otherwise the path in `$ARGUMENTS`). It reads the code itself and returns
+findings JSON: what the verifier cannot catch — silent assumptions, unexercised
+boundaries, security posture, unjustified complexity.
+
+Present the findings grouped by severity, critical first, each with its concrete
+trigger. Do not fix anything; that is the operator's call.

@@ -1,9 +1,12 @@
 ---
-description: Configure PQA at project (./.claude) or system (~/.claude) level via scripts/install.sh; wires hooks, agents, skills,...
+description: Install PQA hooks, agents, and memory at project or system scope.
 argument-hint: <project|system>
 ---
 
-Configure PQA at project (./.claude) or system (~/.claude) level via scripts/install.sh; wires hooks, agents, skills, commands, and initialises memory. Task: $ARGUMENTS
+```bash
+bash scripts/install.sh "$ARGUMENTS"
+```
 
-Hold the PQA invariant throughout: evidence over eloquence, the verifier is the source of
-truth, and conviction protects exploration without exempting it from verification.
+The script wires hooks, seeds the memory DB via the migration runner, and creates
+`.pqa/`. Report what it printed — including the scope it installed to — and surface
+any non-zero exit verbatim. Default scope when `$ARGUMENTS` is empty: `project`.

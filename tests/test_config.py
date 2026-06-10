@@ -427,7 +427,9 @@ def test_load_or_defaults_with_missing_file_returns_defaults(
     cfg = load_or_defaults(tmp_path / "no-such-file.toml")
     assert cfg.branches == 3
     assert cfg.verify_tests is False
-    assert cfg.model == "opus"
+    # Fable 5 is the default for the work that decides output quality (operator
+    # directive 2026-06-10: "for actual coding and other main stuff, always fable 5").
+    assert cfg.model == "fable"
     assert cfg.run_budget_usd == pytest.approx(5.0)
     assert cfg.run_budget_tokens == 800_000
     assert cfg.max_spiral_depth == 1

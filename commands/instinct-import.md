@@ -1,9 +1,14 @@
 ---
-description: Import instincts shared by others from a JSON file into your memory via scripts/instincts.py — continuous learning...
+description: Import instincts shared by someone else into your memory.
 argument-hint: <file>
 ---
 
-Import instincts shared by others from a JSON file into your memory via scripts/instincts.py — continuous learning across people, not just sessions. Task: $ARGUMENTS
+A teammate's accumulated judgment becomes yours:
 
-Hold the PQA invariant throughout: evidence over eloquence, the verifier is the source of
-truth, and conviction protects exploration without exempting it from verification.
+```bash
+python3 scripts/instincts.py import "$ARGUMENTS"
+```
+
+Report how many instincts were imported/updated and their origin tag. Imported
+instincts carry their own confidence — your runs will recalibrate them against
+your reality.

@@ -1,8 +1,14 @@
 ---
-description: Run the verifier gate standalone via pqa-verifier: tests, types, lint, coverage, mutation. Report objective numbers...
+description: Run the verifier standalone — real tests, types, lint, honest report.
+argument-hint: [path]
 ---
 
-Run the verifier gate standalone via pqa-verifier: tests, types, lint, coverage, mutation. Report objective numbers as the confidence qualifier.
+Verification, standalone — the only signal from outside the model's distribution.
 
-Hold the PQA invariant throughout: evidence over eloquence, the verifier is the source of
-truth, and conviction protects exploration without exempting it from verification.
+Dispatch `pqa-verifier` via Task on `$ARGUMENTS` (default: the working tree). It runs
+the project's real test/type/lint commands and returns the structured result with a
+confidence qualifier (`verified (N% coverage)` / `passes-but-thinly-tested` /
+`UNVERIFIED — no test suite`).
+
+Report the result verbatim, including the first failure detail when red. Never soften
+a red into a "mostly passing".
