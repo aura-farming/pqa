@@ -44,7 +44,7 @@ jobs:
         with:
           fetch-depth: 0       # full history so secrets in any commit are caught
       - name: Gitleaks
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # required by v2 to scan PR diffs
 
