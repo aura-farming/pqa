@@ -12,7 +12,7 @@ dependencies = []  # the harness core is stdlib-only by design
 # Managed with uv. Dependabot keeps these at latest.
 [dependency-groups]
 dev = [
-    "pytest>=9.0",
+    "pytest>=9.1.1",
     "pytest-cov>=6.0",
     "ruff>=0.15.15",
     "pyright>=1.1.409",
